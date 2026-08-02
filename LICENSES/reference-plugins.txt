@@ -1,0 +1,16 @@
+Parts of this project are adapted from the provided Llama Club, Terpinheimer,
+and PB Tracker Sync plugins. Each adapted source file has a provenance notice
+at its top. Complete copies of the upstream license texts are included here:
+
+- llama-LICENSE.txt
+- pb-tracker-sync-LICENSE.txt
+- terpinheimer-LICENSE.txt
+
+The complete dependency license texts carried by the Llama Club reference are
+also reproduced in dink-LICENSE.txt, reval-cc-LICENSE.txt,
+runelite-LICENSE.txt, and wom-LICENSE.txt.
+
+The collection-log item-row capture flow and in-log refresh button are adapted
+from RuneProfile, Copyright (c) 2022 Reinhardt Rijna, and WikiSync. Both are
+distributed under the BSD 2-Clause License. See
+https://github.com/RuneProfile/RuneProfile and https://github.com/weirdgloop/WikiSync.

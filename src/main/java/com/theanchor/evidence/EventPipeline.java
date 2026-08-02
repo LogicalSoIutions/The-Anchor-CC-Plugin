@@ -1,0 +1,194 @@
+package com.theanchor.evidence;
+
+import com.theanchor.AnchorConfig;
+import com.theanchor.api.AnchorApiClient;
+import com.theanchor.model.AnchorModels;
+import com.theanchor.service.PartyTracker;
+import com.theanchor.service.RulesService;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import javax.inject.Inject;
+import javax.inject.Singleton;
+import net.runelite.api.Client;
+import net.runelite.api.Player;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+@Singleton
+public class EventPipeline
+{
+	private static final Logger log = LoggerFactory.getLogger(EventPipeline.class);
+	private final EventDeduplicator deduplicator = new EventDeduplicator(8_000L);
+	private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
+	@Inject private Client client;
+	@Inject private AnchorConfig config;
+	@Inject private ScreenshotService screenshots;
+	@Inject private EvidenceStore store;
+	@Inject private AnchorApiClient api;
+	@Inject private RulesService rules;
+	@Inject private PartyTracker parties;
+	@Inject private ScheduledExecutorService executor;
+
+	public void addListener(Runnable listener) { listeners.add(listener); }
+	public void removeListener(Runnable listener) { listeners.remove(listener); }
+
+	public void capture(String type, String dedupeKey, AnchorModels.Source source, List<AnchorModels.Item> items,
+		java.util.Map<String, Object> details, boolean includeParty)
+	{
+		Player local = client.getLocalPlayer();
+		if (local == null || local.getName() == null || !deduplicator.accept(type + '|' + dedupeKey, System.currentTimeMillis())) return;
+		AnchorModels.EventEnvelope envelope = new AnchorModels.EventEnvelope();
+		envelope.eventId = UUID.randomUUID().toString(); envelope.eventType = type; envelope.capturedAt = Instant.now().toString();
+		envelope.player = new AnchorModels.PlayerIdentity(); envelope.player.name = local.getName(); envelope.player.accountHash = String.valueOf(client.getAccountHash());
+		envelope.source = source; if (items != null) envelope.items.addAll(items); if (details != null) envelope.details.putAll(details);
+		String partySource = source == null ? null : source.name;
+		if (partySource == null && details != null && details.get("record") instanceof AnchorModels.PbRecord)
+			partySource = ((AnchorModels.PbRecord) details.get("record")).activity;
+		envelope.party = includeParty ? parties.snapshot(partySource) : null; envelope.rulesVersion = rules.current().version; envelope.pluginVersion = AnchorApiClient.PLUGIN_VERSION;
+		envelope.context.put("world", client.getWorld()); envelope.context.put("gameCycle", client.getGameCycle());
+		screenshots.captureNextFrame(image ->
+		{
+			if (image == null)
+			{
+				log.warn("Evidence capture returned no screenshot for event {} ({})", envelope.eventId, envelope.eventType);
+				return;
+			}
+			try
+			{
+				EvidenceStore.Record record = store.save(envelope, image); notifyListeners();
+				upload(record, false);
+			}
+			catch (Exception e)
+			{
+				log.warn("Could not save evidence for event {} ({})", envelope.eventId, envelope.eventType, e);
+			}
+		});
+	}
+
+	public void retryAll()
+	{
+		for (EvidenceStore.Record record : store.records())
+			if (record.status == AnchorModels.EventStatus.PENDING || record.status == AnchorModels.EventStatus.FAILED) upload(record, true);
+	}
+
+	public void upload(EvidenceStore.Record record, boolean manual)
+	{
+		String code = config.authenticationCode() == null ? "" : config.authenticationCode().trim();
+		if (code.isEmpty())
+		{
+			log.warn("Skipped upload for event {} ({}): no authentication code is configured", eventId(record), eventType(record));
+			return;
+		}
+		record.status = AnchorModels.EventStatus.UPLOADING; record.error = null; record.updatedAt = Instant.now().toString(); persist(record);
+		api.uploadEvent(record.metadata, Path.of(record.screenshotPath), record.format, result ->
+		{
+			if (result.isSuccessful() && result.value != null)
+			{
+				record.submissionId = result.value.submissionId; record.status = parseStatus(result.value.status);
+				record.retryCount = 0;
+			}
+			else
+			{
+				record.status = AnchorModels.EventStatus.FAILED;
+				record.error = result.error == null ? "Empty server response" : result.error;
+				record.retryCount++;
+				log.warn("Evidence upload failed for event {} ({}): HTTP {}, error={}, retry={}, manual={}",
+					eventId(record), eventType(record), result.statusCode, record.error, record.retryCount, manual);
+				if (!manual && result.isRetryable() && record.retryCount <= 5)
+				{
+					long delay = Math.min(300, 5L << Math.min(6, record.retryCount));
+					executor.schedule(() -> upload(record, false), delay, TimeUnit.SECONDS);
+				}
+			}
+			record.updatedAt = Instant.now().toString(); persist(record);
+		});
+	}
+
+	public void updateAndSubmit(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers, String notes)
+	{
+		if (record.submissionId == null)
+		{
+			record.error = "Submission ID is unavailable; retry the upload";
+			log.warn("Could not submit event {}: submission ID is unavailable", eventId(record));
+			persist(record);
+			return;
+		}
+		record.status = AnchorModels.EventStatus.UPLOADING;
+		record.error = null;
+		persist(record);
+		int size = Math.max(1, partySize);
+		int clan = Math.max(0, Math.min(size, clanMembers));
+		int nonClan = Math.max(0, Math.min(size - clan, nonClanMembers));
+		api.updateSubmission(record.submissionId, size, clan, nonClan, notes == null ? "" : notes, patched ->
+		{
+			if (!patched.isSuccessful())
+			{
+				record.status = AnchorModels.EventStatus.DRAFT;
+				record.error = patched.error;
+				log.warn("Submission update failed for event {} (submission {}): HTTP {}, error={}",
+					eventId(record), record.submissionId, patched.statusCode, patched.error);
+				persist(record);
+				return;
+			}
+			api.submit(record.submissionId, submitted ->
+			{
+				if (submitted.isSuccessful()) { record.status = AnchorModels.EventStatus.SUBMITTED; record.error = null; }
+				else
+				{
+					record.status = AnchorModels.EventStatus.DRAFT;
+					record.error = submitted.error;
+					log.warn("Submission failed for event {} (submission {}): HTTP {}, error={}",
+						eventId(record), record.submissionId, submitted.statusCode, submitted.error);
+				}
+				persist(record);
+			});
+		});
+	}
+
+	public void refreshStatuses(String playerName)
+	{
+		if (playerName == null || playerName.isBlank()) return;
+		api.getSubmissions(playerName, result ->
+		{
+			if (!result.isSuccessful() || result.value == null)
+			{
+				log.warn("Could not refresh submissions: HTTP {}, error={}", result.statusCode,
+					result.error == null ? "empty server response" : result.error);
+				return;
+			}
+			for (AnchorModels.SubmissionSummary summary : result.value)
+			{
+				for (EvidenceStore.Record record : store.records())
+				{
+					if ((summary.eventId != null && summary.eventId.equals(record.metadata.eventId))
+						|| (summary.submissionId != null && summary.submissionId.equals(record.submissionId)))
+					{
+						record.submissionId = summary.submissionId; record.status = parseStatus(summary.status);
+						persist(record);
+					}
+				}
+			}
+		});
+	}
+
+	private void persist(EvidenceStore.Record record)
+	{
+		try { store.writeRecord(record); }
+		catch (Exception e) { log.warn("Could not persist event {} ({})", eventId(record), eventType(record), e); }
+		notifyListeners();
+	}
+	private void notifyListeners() { for (Runnable listener : listeners) listener.run(); }
+	private static String eventId(EvidenceStore.Record record) { return record == null || record.metadata == null ? "unknown" : record.metadata.eventId; }
+	private static String eventType(EvidenceStore.Record record) { return record == null || record.metadata == null ? "unknown" : record.metadata.eventType; }
+	private static AnchorModels.EventStatus parseStatus(String status)
+	{
+		if (status == null) return AnchorModels.EventStatus.DRAFT;
+		try { return AnchorModels.EventStatus.valueOf(status.toUpperCase(java.util.Locale.ROOT)); }
+		catch (IllegalArgumentException e) { return AnchorModels.EventStatus.DRAFT; }
+	}
+}
