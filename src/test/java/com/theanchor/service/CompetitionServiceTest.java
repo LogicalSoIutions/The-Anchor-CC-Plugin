@@ -11,12 +11,14 @@ import static org.junit.Assert.*;
 
 public class CompetitionServiceTest
 {
-	@Test public void calculatesAndSortsGainInsteadOfTrustingArrayOrder()
+	@Test public void parsesLatestValueAndSortsInsteadOfTrustingArrayOrder()
 	{
 		AnchorModels.Competition competition = new AnchorModels.Competition();
-		competition.topHistory = Arrays.asList(entry("Second", 100, 150), entry("First", 20, 120));
+		competition.topHistory = Arrays.asList(entry("LowerTotal", 20, 120), entry("HigherTotal", 100, 150));
 		java.util.List<CompetitionService.Leader> leaders = CompetitionService.leaders(competition, 3);
-		assertEquals("First", leaders.get(0).getName()); assertEquals(100, leaders.get(0).getGain()); assertEquals(50, leaders.get(1).getGain());
+		assertEquals("HigherTotal", leaders.get(0).getName());
+		assertEquals(150, leaders.get(0).getValue());
+		assertEquals(120, leaders.get(1).getValue());
 	}
 
 	@Test public void convertsFinishedCompetitionToPanel()
@@ -37,7 +39,7 @@ public class CompetitionServiceTest
 		assertEquals("/competition-artwork/botw-123.png", panel.artworkUrl);
 		assertEquals(1, panel.leaders.size());
 		assertEquals("Winner", panel.leaders.get(0).displayName);
-		assertEquals(90, panel.leaders.get(0).gained);
+		assertEquals(100, panel.leaders.get(0).gained);
 	}
 
 	@Test public void infersUpcomingStatusFromStartTime()

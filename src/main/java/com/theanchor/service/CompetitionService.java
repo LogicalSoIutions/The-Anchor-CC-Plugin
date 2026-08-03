@@ -21,12 +21,11 @@ public final class CompetitionService
 		for (AnchorModels.TopHistory entry : competition.topHistory)
 		{
 			if (entry == null || entry.player == null || entry.history == null || entry.history.isEmpty()) continue;
-			long first = entry.history.get(0).value;
-			long last = entry.history.get(entry.history.size() - 1).value;
+			long value = entry.history.get(entry.history.size() - 1).value;
 			String name = entry.player.displayName == null ? entry.player.username : entry.player.displayName;
-			result.add(new Leader(name == null ? "Unknown" : name, Math.max(0, last - first)));
+			result.add(new Leader(name == null ? "Unknown" : name, Math.max(0, value)));
 		}
-		result.sort(Comparator.comparingLong(Leader::getGain).reversed().thenComparing(Leader::getName, String.CASE_INSENSITIVE_ORDER));
+		result.sort(Comparator.comparingLong(Leader::getValue).reversed().thenComparing(Leader::getName, String.CASE_INSENSITIVE_ORDER));
 		return result.subList(0, Math.min(limit, result.size()));
 	}
 
@@ -62,9 +61,9 @@ public final class CompetitionService
 			leader.rank = i + 1;
 			leader.username = l.getName();
 			leader.displayName = l.getName();
-			leader.gained = l.getGain();
+			leader.gained = l.getValue();
 			leader.unit = panel.unit;
-			leader.displayValue = String.format("%,d %s", l.getGain(), panel.unit);
+			leader.displayValue = String.format("%,d %s", l.getValue(), panel.unit);
 			panel.leaders.add(leader);
 		}
 		return panel;
@@ -101,9 +100,10 @@ public final class CompetitionService
 	public static final class Leader
 	{
 		private final String name;
-		private final long gain;
-		public Leader(String name, long gain) { this.name = name; this.gain = gain; }
+		private final long value;
+		public Leader(String name, long value) { this.name = name; this.value = value; }
 		public String getName() { return name; }
-		public long getGain() { return gain; }
+		public long getValue() { return value; }
+		public long getGain() { return value; }
 	}
 }
