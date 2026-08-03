@@ -58,7 +58,38 @@ public class AnchorDataService
 			notifyListeners();
 		});
 		String base = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().replaceAll("/+$", "");
-		api.getCompetitionPanels(result -> { if (result.isSuccessful()) competitionPanels = result.value; notifyListeners(); });
+		api.getCompetitionPanels(result ->
+		{
+			if (result.isSuccessful() && result.value != null)
+			{
+				competitionPanels = result.value;
+			}
+			if (competitionPanels == null || competitionPanels.botw == null || competitionPanels.sotw == null)
+			{
+				api.getCompetitions(compResult ->
+				{
+					if (compResult.isSuccessful() && compResult.value != null)
+					{
+						if (competitionPanels == null) competitionPanels = new AnchorModels.CompetitionPanels();
+						if (competitionPanels.botw == null && compResult.value.botw != null)
+						{
+							AnchorModels.Competition comp = compResult.value.botw.current != null ? compResult.value.botw.current : compResult.value.botw.previous;
+							competitionPanels.botw = CompetitionService.convertToPanel(comp, "BOTW");
+						}
+						if (competitionPanels.sotw == null && compResult.value.sotw != null)
+						{
+							AnchorModels.Competition comp = compResult.value.sotw.current != null ? compResult.value.sotw.current : compResult.value.sotw.previous;
+							competitionPanels.sotw = CompetitionService.convertToPanel(comp, "SOTW");
+						}
+					}
+					notifyListeners();
+				});
+			}
+			else
+			{
+				notifyListeners();
+			}
+		});
 		images.loadWebsiteImage("botw", base + "/botw.png", image -> { botwImage = image; notifyListeners(); });
 		images.loadWebsiteImage("sotw", base + "/sotw.png", image -> { sotwImage = image; notifyListeners(); });
 		rules.refresh(this::notifyListeners);

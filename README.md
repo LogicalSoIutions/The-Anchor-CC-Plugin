@@ -5,6 +5,7 @@ RuneLite Plugin Hub project for The Anchor clan.
 ## Features
 
 - Home panel with member ranks, points, next-rank progress, BOTW, and SOTW.
+- Event alerts delivered to game chat with an optional in-game overlay.
 - Automatic full-client evidence capture for eligible loot, collection-log unlocks, pets, Combat Achievement tiers, and PBs.
 - Durable local outbox and editable loot-submission drafts.
 - Raid scoreboard or observed boss-interaction party-size estimates without storing other player names.

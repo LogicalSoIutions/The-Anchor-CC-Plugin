@@ -1,5 +1,6 @@
 package com.theanchor;
 
+import java.awt.Color;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -18,6 +19,9 @@ public interface AnchorConfig extends Config
 
 	@ConfigSection(name = "Appearance", description = "Customize The Anchor side panel", position = 2)
 	String APPEARANCE = "appearance";
+
+	@ConfigSection(name = "Event Alerts", description = "Clan event announcements", position = 3)
+	String EVENT_ALERTS = "eventAlerts";
 
 	@ConfigItem(keyName = "authenticationCode", name = "Authentication code",
 		description = "Run /connect in The Anchor Discord and paste the permanent code here",
@@ -47,5 +51,20 @@ public interface AnchorConfig extends Config
 		description = "Animate the side-panel banner; disable to show the static Anchor banner",
 		section = APPEARANCE, position = 0)
 	default boolean animatedBanner() { return true; }
+
+	@ConfigItem(keyName = "eventAlerts", name = "Event Alerts",
+		description = "Receive new event announcements in game chat",
+		section = EVENT_ALERTS, position = 0)
+	default boolean eventAlerts() { return true; }
+
+	@ConfigItem(keyName = "eventAlertOverlay", name = "Event Alert Overlay",
+		description = "Show new event announcements in an in-game overlay",
+		section = EVENT_ALERTS, position = 1)
+	default boolean eventAlertOverlay() { return true; }
+
+	@ConfigItem(keyName = "eventAlertColor", name = "Event Alert Color",
+		description = "Choose the color used for event announcements",
+		section = EVENT_ALERTS, position = 2)
+	default Color eventAlertColor() { return Color.RED; }
 
 }

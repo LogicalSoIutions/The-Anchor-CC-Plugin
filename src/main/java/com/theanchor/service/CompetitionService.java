@@ -29,6 +29,59 @@ public final class CompetitionService
 		return result.subList(0, Math.min(limit, result.size()));
 	}
 
+	public static AnchorModels.CompetitionPanel convertToPanel(AnchorModels.Competition comp, String kind)
+	{
+		if (comp == null) return null;
+		AnchorModels.CompetitionPanel panel = new AnchorModels.CompetitionPanel();
+		panel.competitionId = comp.id;
+		panel.kind = kind;
+		panel.title = comp.title;
+		panel.metric = comp.metric;
+		boolean isBotw = "BOTW".equalsIgnoreCase(kind);
+		if (isBotw)
+		{
+			panel.metricLabel = comp.bossName != null && !comp.bossName.isBlank() ? comp.bossName : formatMetricLabel(comp.metric);
+			panel.unit = "KC";
+		}
+		else
+		{
+			panel.metricLabel = comp.skillName != null && !comp.skillName.isBlank() ? comp.skillName : formatMetricLabel(comp.metric);
+			panel.unit = "XP";
+		}
+		panel.startsAt = comp.startsAt;
+		panel.endsAt = comp.endsAt;
+		panel.participantCount = comp.participantCount;
+		panel.status = comp.status != null && !comp.status.isBlank() ? comp.status : "finished";
+		List<Leader> leaders = leaders(comp, 10);
+		for (int i = 0; i < leaders.size(); i++)
+		{
+			Leader l = leaders.get(i);
+			AnchorModels.PanelLeader leader = new AnchorModels.PanelLeader();
+			leader.rank = i + 1;
+			leader.username = l.getName();
+			leader.displayName = l.getName();
+			leader.gained = l.getGain();
+			leader.unit = panel.unit;
+			leader.displayValue = String.format("%,d %s", l.getGain(), panel.unit);
+			panel.leaders.add(leader);
+		}
+		return panel;
+	}
+
+	public static String formatMetricLabel(String metric)
+	{
+		if (metric == null || metric.isBlank()) return "";
+		String[] words = metric.replace('_', ' ').split("\\s+");
+		StringBuilder sb = new StringBuilder();
+		for (String word : words)
+		{
+			if (word.isEmpty()) continue;
+			if (sb.length() > 0) sb.append(' ');
+			sb.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1).toLowerCase(java.util.Locale.ROOT));
+		}
+		return sb.toString();
+	}
+
 	public static final class Leader
 	{
 		private final String name;

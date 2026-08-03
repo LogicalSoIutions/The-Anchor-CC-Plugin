@@ -22,12 +22,14 @@ import java.util.regex.Pattern;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
@@ -56,6 +58,7 @@ public class PersonalBestService
 			|| lower.startsWith("nightmare");
 	}
 	@Inject private Client client;
+	@Inject private ClientThread clientThread;
 	@Inject private ConfigManager configManager;
 	@Inject private AnchorApiClient api;
 	@Inject private EventPipeline pipeline;
@@ -131,7 +134,7 @@ public class PersonalBestService
 				return;
 			}
 			lastFingerprint = fingerprint;
-			sync(records, true, false, null);
+			sync(records, true, false, null, true);
 		}
 	}
 
@@ -202,7 +205,16 @@ public class PersonalBestService
 
 	private void sync(List<AnchorModels.PbRecord> records, boolean bulk, boolean evidence, Double previous)
 	{
+		sync(records, bulk, evidence, previous, false);
+	}
+
+	private void sync(List<AnchorModels.PbRecord> records, boolean bulk, boolean evidence, Double previous, boolean fromAdventureLog)
+	{
 		if ((!bulk && records.isEmpty()) || client.getLocalPlayer() == null) return;
+		if (fromAdventureLog)
+		{
+			message("Syncing your adventure log with The Anchor...");
+		}
 		AnchorModels.PbBulkRequest request = new AnchorModels.PbBulkRequest(); request.syncId = UUID.randomUUID().toString(); request.capturedAt = Instant.now().toString();
 		request.player = new AnchorModels.PlayerIdentity(); request.player.name = client.getLocalPlayer().getName(); request.player.accountHash = String.valueOf(client.getAccountHash()); request.records.addAll(records);
 		status = "Syncing " + records.size() + " PB" + (records.size() == 1 ? "" : "s") + "…";
@@ -214,6 +226,21 @@ public class PersonalBestService
 				"Anchor PB sync completed: player={}, records={}, syncId={}", request.player.name, records.size(), request.syncId);
 			else log.warn(
 				"Anchor PB sync failed: player={}, syncId={}, error={}", request.player.name, request.syncId, result.error);
+
+			if (fromAdventureLog)
+			{
+				clientThread.invokeLater(() ->
+				{
+					if (result.isSuccessful())
+					{
+						message("Your adventure log has been synced with The Anchor.");
+					}
+					else
+					{
+						message("The Anchor queued your adventure log and will retry it automatically.");
+					}
+				});
+			}
 		});
 		if (evidence)
 		{
@@ -221,6 +248,11 @@ public class PersonalBestService
 			// Team size is already part of PbRecord when RuneLite provides it. PB evidence never needs loot-split metadata.
 			pipeline.capture("personal_best", record.activity + '|' + record.durationMillis, null, null, details, false);
 		}
+	}
+
+	private void message(String text)
+	{
+		client.addChatMessage(ChatMessageType.CONSOLE, "The Anchor", text, "The Anchor");
 	}
 
 	private void hydrateKnown()

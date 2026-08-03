@@ -80,6 +80,7 @@ public final class AnchorModels
 		public String endsAt;
 		public int participantCount;
 		public String unit;
+		public String status;
 		public List<PanelLeader> leaders = new ArrayList<>();
 	}
 
@@ -111,6 +112,7 @@ public final class AnchorModels
 		public String startsAt;
 		public String endsAt;
 		public int participantCount;
+		public String status;
 		public List<TopHistory> topHistory = new ArrayList<>();
 	}
 

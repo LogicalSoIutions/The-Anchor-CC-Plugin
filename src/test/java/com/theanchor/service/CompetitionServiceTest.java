@@ -19,6 +19,25 @@ public class CompetitionServiceTest
 		assertEquals("First", leaders.get(0).getName()); assertEquals(100, leaders.get(0).getGain()); assertEquals(50, leaders.get(1).getGain());
 	}
 
+	@Test public void convertsFinishedCompetitionToPanel()
+	{
+		AnchorModels.Competition competition = new AnchorModels.Competition();
+		competition.id = 123L;
+		competition.metric = "phosanis_nightmare";
+		competition.bossName = "Phosani's Nightmare";
+		competition.topHistory = Arrays.asList(entry("Winner", 10, 100));
+		competition.status = "finished";
+		AnchorModels.CompetitionPanel panel = CompetitionService.convertToPanel(competition, "BOTW");
+		assertNotNull(panel);
+		assertEquals("BOTW", panel.kind);
+		assertEquals("Phosani's Nightmare", panel.metricLabel);
+		assertEquals("KC", panel.unit);
+		assertEquals("finished", panel.status);
+		assertEquals(1, panel.leaders.size());
+		assertEquals("Winner", panel.leaders.get(0).displayName);
+		assertEquals(90, panel.leaders.get(0).gained);
+	}
+
 	private static AnchorModels.TopHistory entry(String name, long first, long last)
 	{
 		AnchorModels.TopHistory entry = new AnchorModels.TopHistory(); entry.player = new AnchorModels.CompetitionPlayer(); entry.player.displayName = name;

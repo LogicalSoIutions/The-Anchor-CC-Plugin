@@ -88,7 +88,7 @@ public class AnchorPanel extends PluginPanel
 	private final ConfigManager configManager;
 	private final SpriteManager spriteManager;
 	private final Runnable dataListener = this::refreshOnEdt;
-	private final JLabel banner = new StretchIconLabel(true);
+	private final JLabel banner = new AspectRatioIconLabel();
 	private final JLabel avatar = new JLabel();
 	private final JLabel identity = new JLabel("Log in to RuneLite", SwingConstants.LEFT);
 	private final JLabel status = muted("");
@@ -334,7 +334,7 @@ public class AnchorPanel extends PluginPanel
 		Runnable update = () ->
 		{
 			banner.setIcon(loadBannerIcon(config.animatedBanner()));
-			((StretchIconLabel) banner).refreshAspectRatio();
+			((AspectRatioIconLabel) banner).refreshAspectRatio();
 			banner.revalidate();
 			banner.repaint();
 		};
@@ -442,16 +442,38 @@ public class AnchorPanel extends PluginPanel
 		JPanel card = card();
 		int cardContentWidth = PANEL_WIDTH - 32;
 		BufferedImage scaledArtwork = scaleToWidth(image == null ? placeholderCompetition(kind) : image, cardContentWidth);
-		JLabel artwork = new StretchIconLabel(new ImageIcon(scaledArtwork));
+		JLabel artwork = new AspectRatioIconLabel();
+		artwork.setIcon(new ImageIcon(scaledArtwork));
 		artwork.setAlignmentX(Component.LEFT_ALIGNMENT);
-		artwork.setMaximumSize(new Dimension(Integer.MAX_VALUE, scaledArtwork.getHeight()));
 		card.add(artwork); card.add(Box.createVerticalStrut(5));
-		String name = competition == null ? "No active competition" : value(competition.metricLabel);
-		card.add(competitionHeading(kind + " · " + name));
+		boolean finished = isFinished(competition);
 		if (competition == null) { card.add(muted("Competition data is currently unavailable")); return card; }
 		List<AnchorModels.PanelLeader> leaders = competition.leaders == null ? java.util.Collections.emptyList() : competition.leaders;
 		long leadingScore = leaders.stream().mapToLong(leader -> Math.max(0, leader.gained)).max().orElse(0);
 		Color accent = "BOTW".equals(kind) ? BOTW_ACCENT : SOTW_ACCENT;
+		boolean showPersonalProgress = !finished
+			|| (playerRank != null && playerRank.rank != null && playerRank.rank <= 3);
+		if (showPersonalProgress)
+		{
+			card.add(competitionSectionHeading("YOUR PROGRESS", accent));
+			card.add(Box.createVerticalStrut(3));
+			if (playerRank == null || playerRank.rank == null)
+			{
+				card.add(muted("No personal progress yet"));
+			}
+			else
+			{
+				String score = playerRank.displayValue == null || playerRank.displayValue.isBlank()
+					? number(playerRank.gained) + " " + value(playerRank.unit == null ? competition.unit : playerRank.unit)
+					: playerRank.displayValue;
+				card.add(leaderRow(playerRank.rank, value(playerName), score,
+					leadingScore == 0 ? 0 : (double) Math.max(0, playerRank.gained) / leadingScore, accent, true));
+			}
+			card.add(Box.createVerticalStrut(6));
+		}
+
+		card.add(competitionSectionHeading(finished ? "WINNERS" : "LEADERBOARD", SCORE_COLOR));
+		card.add(Box.createVerticalStrut(3));
 		for (int i = 0; i < Math.min(3, leaders.size()); i++)
 		{
 			AnchorModels.PanelLeader leader = leaders.get(i);
@@ -464,18 +486,7 @@ public class AnchorPanel extends PluginPanel
 		}
 		if (leaders.isEmpty())
 		{
-			card.add(muted("No leaderboard history yet"));
-		}
-		else if (playerRank != null && playerRank.rank != null && playerRank.rank > 3)
-		{
-			card.add(Box.createVerticalStrut(2));
-			card.add(leaderGap());
-			card.add(Box.createVerticalStrut(2));
-			String score = playerRank.displayValue == null || playerRank.displayValue.isBlank()
-				? number(playerRank.gained) + " " + value(playerRank.unit == null ? competition.unit : playerRank.unit)
-				: playerRank.displayValue;
-			card.add(leaderRow(playerRank.rank, value(playerName), score,
-				leadingScore == 0 ? 0 : (double) Math.max(0, playerRank.gained) / leadingScore, accent, true));
+			card.add(muted(finished ? "No completed competition history" : "No leaderboard history yet"));
 		}
 		return card;
 	}
@@ -730,13 +741,12 @@ public class AnchorPanel extends PluginPanel
 		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return heading;
 	}
-	private static JLabel competitionHeading(String text)
+	private static JLabel competitionSectionHeading(String text, Color color)
 	{
-		JLabel heading = new JLabel(html("<div style='text-align:center'><b>" + esc(text) + "</b></div>"));
-		heading.setForeground(Color.WHITE);
-		heading.setFont(heading.getFont().deriveFont(Font.BOLD));
+		JLabel heading = new JLabel(text);
+		heading.setForeground(color);
+		heading.setFont(heading.getFont().deriveFont(Font.BOLD, 11f));
 		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
-		heading.setMaximumSize(new Dimension(PANEL_WIDTH, 40));
 		return heading;
 	}
 	private static JPanel statRow(String leftLabel, String leftValue, Color leftColor,
@@ -844,16 +854,6 @@ public class AnchorPanel extends PluginPanel
 		p.add(scoreLabel, BorderLayout.EAST);
 		return p;
 	}
-	private static JLabel leaderGap()
-	{
-		JLabel dots = new JLabel("\u22ee", SwingConstants.CENTER);
-		dots.setForeground(new Color(130, 133, 136));
-		dots.setFont(dots.getFont().deriveFont(Font.BOLD, 16f));
-		dots.setAlignmentX(Component.LEFT_ALIGNMENT);
-		dots.setMaximumSize(new Dimension(PANEL_WIDTH, 18));
-		dots.setPreferredSize(new Dimension(PANEL_WIDTH, 18));
-		return dots;
-	}
 	private static String styledScore(String score)
 	{
 		String escaped = esc(score);
@@ -865,6 +865,12 @@ public class AnchorPanel extends PluginPanel
 	private static String sharedCompetitionTiming(AnchorModels.CompetitionPanels competitions)
 	{
 		if (competitions == null) return "";
+		boolean botwFinished = competitions.botw != null && isFinished(competitions.botw);
+		boolean sotwFinished = competitions.sotw != null && isFinished(competitions.sotw);
+		if (botwFinished && sotwFinished)
+		{
+			return "Competitions Ended";
+		}
 		String botwEnd = competitions.botw == null ? null : competitions.botw.endsAt;
 		String sotwEnd = competitions.sotw == null ? null : competitions.sotw.endsAt;
 		return countdown(botwEnd == null || botwEnd.isBlank() ? sotwEnd : botwEnd);
@@ -950,6 +956,26 @@ public class AnchorPanel extends PluginPanel
 	private static String rank(Integer value) { return value == null ? "—" : "#" + value; }
 	private static String number(long value) { return NumberFormat.getIntegerInstance(Locale.US).format(value); }
 	private static String value(String value) { return value == null || value.isBlank() ? "—" : value; }
+	private static boolean isFinished(AnchorModels.CompetitionPanel competition)
+	{
+		if (competition == null) return false;
+		if ("finished".equalsIgnoreCase(competition.status)
+			|| "ended".equalsIgnoreCase(competition.status)
+			|| "completed".equalsIgnoreCase(competition.status)
+			|| "inactive".equalsIgnoreCase(competition.status))
+		{
+			return true;
+		}
+		if (competition.endsAt != null && !competition.endsAt.isBlank())
+		{
+			try
+			{
+				return Instant.parse(competition.endsAt).isBefore(Instant.now());
+			}
+			catch (RuntimeException ignored) {}
+		}
+		return false;
+	}
 	private static String countdown(String end) { try { Duration d = Duration.between(Instant.now(), Instant.parse(end)); if (d.isNegative()) return "Ended"; return "Ends in " + d.toDays() + "d " + d.minusDays(d.toDays()).toHours() + "h"; } catch (RuntimeException e) { return ""; } }
 	private static String capitalize(String value) { return value.isEmpty() ? value : Character.toUpperCase(value.charAt(0)) + value.substring(1); }
 	private static String titleCase(String value)
@@ -986,38 +1012,27 @@ public class AnchorPanel extends PluginPanel
 		return resource == null ? new ImageIcon(scale(placeholderBanner(), PANEL_WIDTH, 62)) : new ImageIcon(resource);
 	}
 
-	private static final class StretchIconLabel extends JLabel
+	private static final class AspectRatioIconLabel extends JLabel
 	{
-		private final boolean preserveAspectRatio;
 		private int aspectHeight = -1;
 
-		private StretchIconLabel(boolean preserveAspectRatio)
+		private AspectRatioIconLabel()
 		{
-			this.preserveAspectRatio = preserveAspectRatio;
-			if (preserveAspectRatio)
+			addComponentListener(new ComponentAdapter()
 			{
-				addComponentListener(new ComponentAdapter()
+				@Override
+				public void componentResized(ComponentEvent event)
 				{
-					@Override
-					public void componentResized(ComponentEvent event)
-					{
-						refreshAspectRatio();
-					}
-				});
-			}
-		}
-
-		private StretchIconLabel(Icon icon)
-		{
-			super(icon);
-			this.preserveAspectRatio = false;
+					refreshAspectRatio();
+				}
+			});
 		}
 
 		private void refreshAspectRatio()
 		{
 			Icon icon = getIcon();
 			int width = getWidth();
-			if (!preserveAspectRatio || width <= 0 || icon == null || icon.getIconWidth() <= 0 || icon.getIconHeight() <= 0) return;
+			if (width <= 0 || icon == null || icon.getIconWidth() <= 0 || icon.getIconHeight() <= 0) return;
 			int height = Math.max(1, (int) Math.round((double) width * icon.getIconHeight() / icon.getIconWidth()));
 			if (height == aspectHeight) return;
 			aspectHeight = height;

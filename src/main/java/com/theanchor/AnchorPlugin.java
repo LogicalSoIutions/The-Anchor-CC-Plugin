@@ -15,12 +15,14 @@ import com.theanchor.events.PetEventListener;
 import com.theanchor.pb.PersonalBestService;
 import com.theanchor.progress.PlayerProgressService;
 import com.theanchor.service.AnchorDataService;
+import com.theanchor.service.EventAlertService;
 import com.theanchor.service.ImageCache;
 import com.theanchor.service.PartyTracker;
 import com.theanchor.ui.AnchorPanel;
 import com.theanchor.ui.CollectionLogSyncOverlay;
 import com.theanchor.ui.CollectionLogAutoSync;
 import com.theanchor.ui.CollectionLogRefreshButton;
+import com.theanchor.ui.EventAlertOverlay;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
@@ -76,6 +78,8 @@ public class AnchorPlugin extends Plugin
 	@Inject private CollectionLogSyncOverlay collectionLogSyncOverlay;
 	@Inject private CollectionLogAutoSync collectionLogAutoSync;
 	@Inject private CollectionLogRefreshButton collectionLogRefreshButton;
+	@Inject private EventAlertService eventAlerts;
+	@Inject private EventAlertOverlay eventAlertOverlay;
 	@Inject private PartyTracker parties;
 	@Inject private LootEventListener loot;
 	@Inject private CollectionLogEventListener collectionLog;
@@ -94,6 +98,7 @@ public class AnchorPlugin extends Plugin
 	{
 		navigation = NavigationButton.builder().tooltip("The Anchor").icon(loadIcon()).priority(5).panel(panel).build(); toolbar.addNavigation(navigation);
 		overlayManager.add(collectionLogSyncOverlay);
+		overlayManager.add(eventAlertOverlay);
 		collectionLogAutoSync.startUp();
 		collectionLogRefreshButton.startUp();
 		registered = Arrays.asList(parties, loot, collectionLog, collectionLogSync, pets, combatTiers, pbs);
@@ -118,6 +123,8 @@ public class AnchorPlugin extends Plugin
 		data.removeListener(connectionListener);
 		if (navigation != null) { toolbar.removeNavigation(navigation); navigation = null; }
 		overlayManager.remove(collectionLogSyncOverlay);
+		overlayManager.remove(eventAlertOverlay);
+		eventAlerts.resetStateForWorldHopOrLogin();
 		activePlayerName = null;
 		firstConnectionSyncedAccount = null;
 		data.loggedOut(); log.info("The Anchor plugin stopped");
@@ -125,6 +132,12 @@ public class AnchorPlugin extends Plugin
 
 	@Subscribe public void onGameStateChanged(GameStateChanged event)
 	{
+		if (event.getGameState() == GameState.LOGIN_SCREEN
+			|| event.getGameState() == GameState.HOPPING
+			|| event.getGameState() == GameState.CONNECTION_LOST)
+		{
+			eventAlerts.resetStateForWorldHopOrLogin();
+		}
 		if (event.getGameState() == GameState.LOGGED_IN) tryOnLoggedIn();
 		else if (event.getGameState() == GameState.LOGIN_SCREEN)
 		{
@@ -134,7 +147,7 @@ public class AnchorPlugin extends Plugin
 		}
 	}
 
-	@Subscribe public void onGameTick(GameTick event) { tryOnLoggedIn(); }
+	@Subscribe public void onGameTick(GameTick event) { tryOnLoggedIn(); eventAlerts.onGameTick(); }
 
 	@Subscribe public void onConfigChanged(ConfigChanged event)
 	{
@@ -143,6 +156,7 @@ public class AnchorPlugin extends Plugin
 		{
 			case "authenticationCode": firstConnectionSyncedAccount = null; data.validate(); pipeline.retryAll(); break;
 			case "animatedBanner": panel.refreshBanner(); break;
+			case "eventAlerts": eventAlerts.resetStateForWorldHopOrLogin(); break;
 			case "refreshProfile": if (Boolean.parseBoolean(event.getNewValue())) { refreshCurrentPlayer(); resetAction(event.getKey()); } break;
 			case "retryOutbox": if (Boolean.parseBoolean(event.getNewValue())) { pipeline.retryAll(); resetAction(event.getKey()); } break;
 			case "clearImageCache": if (Boolean.parseBoolean(event.getNewValue())) { imageCache.clear(); refreshCurrentPlayer(); resetAction(event.getKey()); } break;
