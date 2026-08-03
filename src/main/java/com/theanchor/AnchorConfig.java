@@ -62,9 +62,23 @@ public interface AnchorConfig extends Config
 		section = EVENT_ALERTS, position = 1)
 	default boolean eventAlertOverlay() { return true; }
 
+	@ConfigItem(keyName = "eventAlertDuration", name = "Overlay Duration (s)",
+		description = "Duration in seconds to display the overlay when a new alert arrives",
+		section = EVENT_ALERTS, position = 2)
+	default int eventAlertDuration() { return 15; }
+
+	@ConfigItem(keyName = "eventAlertFlash", name = "Flash Overlay",
+		description = "Flash the overlay when an event alert is active",
+		section = EVENT_ALERTS, position = 3)
+	default boolean eventAlertFlash() { return false; }
+
+	@ConfigItem(keyName = "eventAlertFlashColor", name = "Flash Color",
+		description = "Choose the background highlight color when flashing",
+		section = EVENT_ALERTS, position = 4)
+	default Color eventAlertFlashColor() { return new Color(175, 215, 255, 240); }
+
 	@ConfigItem(keyName = "eventAlertColor", name = "Event Alert Color",
 		description = "Choose the color used for event announcements",
-		section = EVENT_ALERTS, position = 2)
-	default Color eventAlertColor() { return Color.RED; }
-
+		section = EVENT_ALERTS, position = 5)
+	default Color eventAlertColor() { return new Color(0, 130, 235); }
 }

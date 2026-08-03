@@ -13,7 +13,9 @@ import net.runelite.client.ui.overlay.components.TitleComponent;
 
 public class EventAlertOverlay extends OverlayPanel
 {
-	private static final Color BACKGROUND = new Color(24, 38, 52, 235);
+	private static final Color LIGHT_BACKGROUND = new Color(235, 242, 250, 225);
+	private static final Color FLASH_BACKGROUND = new Color(175, 215, 255, 240);
+	private static final Color BRIGHT_BLUE = new Color(0, 130, 235);
 	private final EventAlertService alerts;
 	private final AnchorConfig config;
 
@@ -23,9 +25,9 @@ public class EventAlertOverlay extends OverlayPanel
 		super(plugin);
 		this.alerts = alerts;
 		this.config = config;
-		setPosition(OverlayPosition.TOP_CENTER);
+		setPosition(OverlayPosition.ABOVE_CHATBOX_RIGHT);
 		setPriority(PRIORITY_HIGH);
-		panelComponent.setBackgroundColor(BACKGROUND);
+		panelComponent.setBackgroundColor(LIGHT_BACKGROUND);
 		panelComponent.setPreferredSize(new Dimension(360, 0));
 	}
 
@@ -35,10 +37,21 @@ public class EventAlertOverlay extends OverlayPanel
 		if (!config.eventAlerts() || !config.eventAlertOverlay()) return null;
 		String message = alerts.activeOverlayMessage();
 		if (message == null) return null;
+
+		boolean flash = config.eventAlertFlash() && (System.currentTimeMillis() / 400) % 2 == 0;
+		Color flashColor = config.eventAlertFlashColor() != null ? config.eventAlertFlashColor() : FLASH_BACKGROUND;
+		panelComponent.setBackgroundColor(flash ? flashColor : LIGHT_BACKGROUND);
+
+		Color textColor = config.eventAlertColor();
+		if (textColor == null)
+		{
+			textColor = BRIGHT_BLUE;
+		}
+
 		panelComponent.getChildren().clear();
 		panelComponent.getChildren().add(TitleComponent.builder()
 			.text("Event Alert: " + message)
-			.color(config.eventAlertColor())
+			.color(textColor)
 			.build());
 		return super.render(graphics);
 	}
