@@ -2,6 +2,7 @@ package com.theanchor.service;
 
 import com.theanchor.AnchorConfig;
 import com.theanchor.api.AnchorApiClient;
+import com.theanchor.model.AnchorModels;
 import java.lang.reflect.Field;
 import org.junit.Test;
 
@@ -9,6 +10,7 @@ import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -44,14 +46,60 @@ public class AnchorDataServiceTest
 		inject(service, "images", images);
 		inject(service, "rules", rules);
 		when(config.apiBaseUrl()).thenReturn("https://the-anchor.cc/");
+		doAnswer(invocation ->
+		{
+			AnchorApiClient.ResultCallback<AnchorModels.CompetitionPanels> callback = invocation.getArgument(0);
+			callback.complete(AnchorApiClient.ApiResult.ok(200, new AnchorModels.CompetitionPanels()));
+			return null;
+		}).when(api).getCompetitionPanels(any());
+		doAnswer(invocation ->
+		{
+			AnchorModels.Competitions competitions = new AnchorModels.Competitions();
+			competitions.botw = pairWithUpcoming(148345L, "mad_angel");
+			competitions.sotw = pairWithUpcoming(147161L, "farming");
+			AnchorApiClient.ResultCallback<AnchorModels.Competitions> callback = invocation.getArgument(0);
+			callback.complete(AnchorApiClient.ApiResult.ok(200, competitions));
+			return null;
+		}).when(api).getCompetitions(any());
 
 		service.refresh("Zach");
 
 		verify(api).getProfile(eq("Zach"), any());
 		verify(api).getCompetitionPanels(any());
-		verify(images).loadWebsiteImage(eq("botw"), eq("https://the-anchor.cc/botw.png"), any());
-		verify(images).loadWebsiteImage(eq("sotw"), eq("https://the-anchor.cc/sotw.png"), any());
+		verify(api).getCompetitions(any());
+		verify(images).loadWebsiteImage(eq("botw-148345"), eq("https://the-anchor.cc/competition-artwork/botw-148345.png"),
+			eq("https://the-anchor.cc/botw.png"), any());
+		verify(images).loadWebsiteImage(eq("sotw-147161"), eq("https://the-anchor.cc/competition-artwork/sotw-147161.png"),
+			eq("https://the-anchor.cc/sotw.png"), any());
 		verify(rules).refresh(any());
+	}
+
+	@Test public void selectsCurrentThenUpcomingThenPrevious()
+	{
+		AnchorModels.CompetitionPair pair = new AnchorModels.CompetitionPair();
+		pair.previous = competition(1L, "crafting");
+		pair.upcoming = competition(2L, "farming");
+		assertEquals(2L, AnchorDataService.selectCompetition(pair).id);
+		pair.current = competition(3L, "agility");
+		assertEquals(3L, AnchorDataService.selectCompetition(pair).id);
+	}
+
+	private static AnchorModels.CompetitionPair pairWithUpcoming(long id, String metric)
+	{
+		AnchorModels.CompetitionPair pair = new AnchorModels.CompetitionPair();
+		pair.upcoming = competition(id, metric);
+		return pair;
+	}
+
+	private static AnchorModels.Competition competition(long id, String metric)
+	{
+		AnchorModels.Competition competition = new AnchorModels.Competition();
+		competition.id = id;
+		competition.metric = metric;
+		competition.artworkUrl = "/competition-artwork/" + ("mad_angel".equals(metric) ? "botw" : "sotw") + "-" + id + ".png";
+		competition.startsAt = "2099-01-01T00:00:00Z";
+		competition.endsAt = "2099-01-08T00:00:00Z";
+		return competition;
 	}
 
 	private static void inject(Object target, String fieldName, Object value) throws Exception

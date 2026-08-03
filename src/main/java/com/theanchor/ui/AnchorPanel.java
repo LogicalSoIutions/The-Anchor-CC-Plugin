@@ -446,8 +446,17 @@ public class AnchorPanel extends PluginPanel
 		artwork.setIcon(new ImageIcon(scaledArtwork));
 		artwork.setAlignmentX(Component.LEFT_ALIGNMENT);
 		card.add(artwork); card.add(Box.createVerticalStrut(5));
+		boolean upcoming = isUpcoming(competition);
 		boolean finished = isFinished(competition);
 		if (competition == null) { card.add(muted("Competition data is currently unavailable")); return card; }
+		if (upcoming)
+		{
+			Color accent = "BOTW".equals(kind) ? BOTW_ACCENT : SOTW_ACCENT;
+			card.add(competitionSectionHeading("UPCOMING", accent));
+			card.add(Box.createVerticalStrut(3));
+			card.add(muted(startsCountdown(competition.startsAt)));
+			return card;
+		}
 		List<AnchorModels.PanelLeader> leaders = competition.leaders == null ? java.util.Collections.emptyList() : competition.leaders;
 		long leadingScore = leaders.stream().mapToLong(leader -> Math.max(0, leader.gained)).max().orElse(0);
 		Color accent = "BOTW".equals(kind) ? BOTW_ACCENT : SOTW_ACCENT;
@@ -865,6 +874,14 @@ public class AnchorPanel extends PluginPanel
 	private static String sharedCompetitionTiming(AnchorModels.CompetitionPanels competitions)
 	{
 		if (competitions == null) return "";
+		boolean botwUpcoming = competitions.botw != null && isUpcoming(competitions.botw);
+		boolean sotwUpcoming = competitions.sotw != null && isUpcoming(competitions.sotw);
+		if (botwUpcoming && sotwUpcoming)
+		{
+			String botwStart = competitions.botw.startsAt;
+			String sotwStart = competitions.sotw.startsAt;
+			return startsCountdown(botwStart == null || botwStart.isBlank() ? sotwStart : botwStart);
+		}
 		boolean botwFinished = competitions.botw != null && isFinished(competitions.botw);
 		boolean sotwFinished = competitions.sotw != null && isFinished(competitions.sotw);
 		if (botwFinished && sotwFinished)
@@ -976,6 +993,18 @@ public class AnchorPanel extends PluginPanel
 		}
 		return false;
 	}
+	private static boolean isUpcoming(AnchorModels.CompetitionPanel competition)
+	{
+		if (competition == null) return false;
+		if ("upcoming".equalsIgnoreCase(competition.status)) return true;
+		if (competition.startsAt != null && !competition.startsAt.isBlank())
+		{
+			try { return Instant.parse(competition.startsAt).isAfter(Instant.now()); }
+			catch (RuntimeException ignored) { }
+		}
+		return false;
+	}
+	private static String startsCountdown(String start) { try { Duration d = Duration.between(Instant.now(), Instant.parse(start)); if (d.isNegative()) return "Starting now"; long days = d.toDays(); long hours = d.minusDays(days).toHours(); long minutes = d.minusDays(days).minusHours(hours).toMinutes(); return "Starts in " + (days > 0 ? days + "d " : "") + (hours > 0 ? hours + "h " : "") + minutes + "m"; } catch (RuntimeException e) { return "Starts soon"; } }
 	private static String countdown(String end) { try { Duration d = Duration.between(Instant.now(), Instant.parse(end)); if (d.isNegative()) return "Ended"; return "Ends in " + d.toDays() + "d " + d.minusDays(d.toDays()).toHours() + "h"; } catch (RuntimeException e) { return ""; } }
 	private static String capitalize(String value) { return value.isEmpty() ? value : Character.toUpperCase(value.charAt(0)) + value.substring(1); }
 	private static String titleCase(String value)

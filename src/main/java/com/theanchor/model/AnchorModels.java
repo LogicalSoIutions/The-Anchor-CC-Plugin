@@ -76,6 +76,7 @@ public final class AnchorModels
 		public String title;
 		public String metric;
 		public String metricLabel;
+		public String artworkUrl;
 		public String startsAt;
 		public String endsAt;
 		public int participantCount;
@@ -97,6 +98,7 @@ public final class AnchorModels
 	public static final class CompetitionPair
 	{
 		public Competition current;
+		public Competition upcoming;
 		public Competition previous;
 	}
 
@@ -105,6 +107,7 @@ public final class AnchorModels
 		public long id;
 		public String title;
 		public String metric;
+		public String artworkUrl;
 		@SerializedName(value = "bossName", alternate = {"boss_name"})
 		public String bossName;
 		@SerializedName(value = "skillName", alternate = {"skill_name"})

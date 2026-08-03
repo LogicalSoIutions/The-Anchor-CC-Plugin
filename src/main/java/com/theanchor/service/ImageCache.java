@@ -45,6 +45,16 @@ public class ImageCache
 		load(root.resolve("website-images").resolve(safeName(key) + ".img"), url, 0, true, callback);
 	}
 
+	public void loadWebsiteImage(String key, String url, String fallbackUrl, Consumer<BufferedImage> callback)
+	{
+		Path target = root.resolve("website-images").resolve(safeName(key) + ".img");
+		load(target, url, 0, true, image ->
+		{
+			if (image != null) callback.accept(image);
+			else load(target, fallbackUrl, 0, true, callback);
+		});
+	}
+
 	private void load(Path target, String url, long ttl, boolean revalidate, Consumer<BufferedImage> callback)
 	{
 		BufferedImage cached = read(target);

@@ -5,6 +5,7 @@
 package com.theanchor.service;
 
 import com.theanchor.model.AnchorModels;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -37,6 +38,7 @@ public final class CompetitionService
 		panel.kind = kind;
 		panel.title = comp.title;
 		panel.metric = comp.metric;
+		panel.artworkUrl = comp.artworkUrl;
 		boolean isBotw = "BOTW".equalsIgnoreCase(kind);
 		if (isBotw)
 		{
@@ -51,7 +53,7 @@ public final class CompetitionService
 		panel.startsAt = comp.startsAt;
 		panel.endsAt = comp.endsAt;
 		panel.participantCount = comp.participantCount;
-		panel.status = comp.status != null && !comp.status.isBlank() ? comp.status : "finished";
+		panel.status = comp.status != null && !comp.status.isBlank() ? comp.status : inferredStatus(comp);
 		List<Leader> leaders = leaders(comp, 10);
 		for (int i = 0; i < leaders.size(); i++)
 		{
@@ -66,6 +68,20 @@ public final class CompetitionService
 			panel.leaders.add(leader);
 		}
 		return panel;
+	}
+
+	private static String inferredStatus(AnchorModels.Competition competition)
+	{
+		Instant now = Instant.now();
+		try
+		{
+			if (competition.startsAt != null && !competition.startsAt.isBlank()
+				&& Instant.parse(competition.startsAt).isAfter(now)) return "upcoming";
+			if (competition.endsAt != null && !competition.endsAt.isBlank()
+				&& Instant.parse(competition.endsAt).isBefore(now)) return "finished";
+		}
+		catch (RuntimeException ignored) { }
+		return "active";
 	}
 
 	public static String formatMetricLabel(String metric)

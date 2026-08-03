@@ -25,6 +25,7 @@ public class CompetitionServiceTest
 		competition.id = 123L;
 		competition.metric = "phosanis_nightmare";
 		competition.bossName = "Phosani's Nightmare";
+		competition.artworkUrl = "/competition-artwork/botw-123.png";
 		competition.topHistory = Arrays.asList(entry("Winner", 10, 100));
 		competition.status = "finished";
 		AnchorModels.CompetitionPanel panel = CompetitionService.convertToPanel(competition, "BOTW");
@@ -33,9 +34,21 @@ public class CompetitionServiceTest
 		assertEquals("Phosani's Nightmare", panel.metricLabel);
 		assertEquals("KC", panel.unit);
 		assertEquals("finished", panel.status);
+		assertEquals("/competition-artwork/botw-123.png", panel.artworkUrl);
 		assertEquals(1, panel.leaders.size());
 		assertEquals("Winner", panel.leaders.get(0).displayName);
 		assertEquals(90, panel.leaders.get(0).gained);
+	}
+
+	@Test public void infersUpcomingStatusFromStartTime()
+	{
+		AnchorModels.Competition competition = new AnchorModels.Competition();
+		competition.id = 456L;
+		competition.metric = "farming";
+		competition.startsAt = "2099-01-01T00:00:00Z";
+		competition.endsAt = "2099-01-08T00:00:00Z";
+		AnchorModels.CompetitionPanel panel = CompetitionService.convertToPanel(competition, "SOTW");
+		assertEquals("upcoming", panel.status);
 	}
 
 	private static AnchorModels.TopHistory entry(String name, long first, long last)

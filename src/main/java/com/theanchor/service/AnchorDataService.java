@@ -26,6 +26,8 @@ public class AnchorDataService
 	private volatile BufferedImage profileImage;
 	private volatile BufferedImage botwImage;
 	private volatile BufferedImage sotwImage;
+	private volatile long botwImageCompetitionId = Long.MIN_VALUE;
+	private volatile long sotwImageCompetitionId = Long.MIN_VALUE;
 	private volatile Connection connection = Connection.NOT_CONFIGURED;
 	private volatile String message = "Log in to load your Anchor profile";
 
@@ -58,41 +60,102 @@ public class AnchorDataService
 			notifyListeners();
 		});
 		String base = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().replaceAll("/+$", "");
-		api.getCompetitionPanels(result ->
+		api.getCompetitionPanels(panelResult ->
 		{
-			if (result.isSuccessful() && result.value != null)
+			AnchorModels.CompetitionPanels panels = panelResult.isSuccessful() ? panelResult.value : null;
+			api.getCompetitions(compResult ->
 			{
-				competitionPanels = result.value;
-			}
-			if (competitionPanels == null || competitionPanels.botw == null || competitionPanels.sotw == null)
-			{
-				api.getCompetitions(compResult ->
+				AnchorModels.CompetitionPanels resolved = panels;
+				if (compResult.isSuccessful() && compResult.value != null)
 				{
-					if (compResult.isSuccessful() && compResult.value != null)
-					{
-						if (competitionPanels == null) competitionPanels = new AnchorModels.CompetitionPanels();
-						if (competitionPanels.botw == null && compResult.value.botw != null)
-						{
-							AnchorModels.Competition comp = compResult.value.botw.current != null ? compResult.value.botw.current : compResult.value.botw.previous;
-							competitionPanels.botw = CompetitionService.convertToPanel(comp, "BOTW");
-						}
-						if (competitionPanels.sotw == null && compResult.value.sotw != null)
-						{
-							AnchorModels.Competition comp = compResult.value.sotw.current != null ? compResult.value.sotw.current : compResult.value.sotw.previous;
-							competitionPanels.sotw = CompetitionService.convertToPanel(comp, "SOTW");
-						}
-					}
-					notifyListeners();
-				});
-			}
-			else
-			{
+					if (resolved == null) resolved = new AnchorModels.CompetitionPanels();
+					resolved.botw = resolvePanel(resolved.botw, compResult.value.botw, "BOTW");
+					resolved.sotw = resolvePanel(resolved.sotw, compResult.value.sotw, "SOTW");
+				}
+				competitionPanels = resolved;
+				loadCompetitionImages(base, resolved);
 				notifyListeners();
-			}
+			});
 		});
-		images.loadWebsiteImage("botw", base + "/botw.png", image -> { botwImage = image; notifyListeners(); });
-		images.loadWebsiteImage("sotw", base + "/sotw.png", image -> { sotwImage = image; notifyListeners(); });
 		rules.refresh(this::notifyListeners);
+	}
+
+	private static AnchorModels.CompetitionPanel resolvePanel(AnchorModels.CompetitionPanel panel,
+		AnchorModels.CompetitionPair pair, String kind)
+	{
+		AnchorModels.Competition selected = selectCompetition(pair);
+		if (selected == null) return panel;
+		if (panel != null && panel.competitionId == selected.id)
+		{
+			panel.artworkUrl = selected.artworkUrl;
+			return panel;
+		}
+		return CompetitionService.convertToPanel(selected, kind);
+	}
+
+	static AnchorModels.Competition selectCompetition(AnchorModels.CompetitionPair pair)
+	{
+		if (pair == null) return null;
+		if (pair.current != null) return pair.current;
+		if (pair.upcoming != null) return pair.upcoming;
+		return pair.previous;
+	}
+
+	private void loadCompetitionImages(String base, AnchorModels.CompetitionPanels panels)
+	{
+		loadCompetitionImage(base, "botw", panels == null ? null : panels.botw);
+		loadCompetitionImage(base, "sotw", panels == null ? null : panels.sotw);
+	}
+
+	private void loadCompetitionImage(String base, String kind, AnchorModels.CompetitionPanel panel)
+	{
+		long competitionId = panel == null ? 0 : panel.competitionId;
+		if ("botw".equals(kind))
+		{
+			if (botwImageCompetitionId != competitionId) botwImage = null;
+			botwImageCompetitionId = competitionId;
+		}
+		else
+		{
+			if (sotwImageCompetitionId != competitionId) sotwImage = null;
+			sotwImageCompetitionId = competitionId;
+		}
+		String genericUrl = base + "/" + kind + ".png";
+		if (competitionId <= 0)
+		{
+			images.loadWebsiteImage(kind, genericUrl, image -> setCompetitionImage(kind, competitionId, image));
+			return;
+		}
+		String key = kind + "-" + competitionId;
+		String artworkUrl = resolveUrl(base, panel.artworkUrl);
+		if (artworkUrl == null)
+		{
+			images.loadWebsiteImage(key, genericUrl, image -> setCompetitionImage(kind, competitionId, image));
+			return;
+		}
+		images.loadWebsiteImage(key, artworkUrl, genericUrl,
+			image -> setCompetitionImage(kind, competitionId, image));
+	}
+
+	static String resolveUrl(String baseUrl, String supplied)
+	{
+		if (supplied == null || supplied.isBlank()) return null;
+		try
+		{
+			URI uri = URI.create(supplied.trim().replace(" ", "%20"));
+			return uri.isAbsolute() ? uri.toString() : URI.create(baseUrl.replaceAll("/+$", "") + "/").resolve(uri).toString();
+		}
+		catch (IllegalArgumentException e) { return null; }
+	}
+
+	private void setCompetitionImage(String kind, long competitionId, BufferedImage image)
+	{
+		if ("botw".equals(kind))
+		{
+			if (botwImageCompetitionId == competitionId) botwImage = image;
+		}
+		else if (sotwImageCompetitionId == competitionId) sotwImage = image;
+		notifyListeners();
 	}
 
 	static String profileImageUrl(String baseUrl, String playerName, String supplied)
