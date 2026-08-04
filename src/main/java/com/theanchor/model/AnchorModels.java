@@ -196,7 +196,14 @@ public final class AnchorModels
 		public String eventId;
 		public String submissionId;
 		public String status;
-		public List<String> validationMessages;
+		public List<ValidationMessage> validationMessages;
+	}
+	public static final class ValidationMessage
+	{
+		public String code;
+		public String field;
+		public String message;
+		public String severity;
 	}
 	public static final class SubmissionSummary
 	{

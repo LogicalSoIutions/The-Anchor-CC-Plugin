@@ -38,11 +38,23 @@ public final class ScreenshotEncoder
 
 	private static BufferedImage scale(BufferedImage input, double scale)
 	{
-		if (scale >= 1) return input;
-		BufferedImage out = new BufferedImage(Math.max(1, (int) (input.getWidth() * scale)), Math.max(1, (int) (input.getHeight() * scale)), BufferedImage.TYPE_INT_RGB);
+		int width = scale >= 1 ? input.getWidth() : Math.max(1, (int) (input.getWidth() * scale));
+		int height = scale >= 1 ? input.getHeight() : Math.max(1, (int) (input.getHeight() * scale));
+		// The standard JPEG writer rejects images with an alpha channel (including RuneLite's
+		// TYPE_INT_ARGB screenshots) with "Bogus input colorspace". Always render into RGB,
+		// even when no resize is needed, before handing the image to that writer.
+		BufferedImage out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
 		Graphics2D g = out.createGraphics();
-		g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-		g.drawImage(input, 0, 0, out.getWidth(), out.getHeight(), null); g.dispose(); return out;
+		try
+		{
+			g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+			g.drawImage(input, 0, 0, out.getWidth(), out.getHeight(), null);
+		}
+		finally
+		{
+			g.dispose();
+		}
+		return out;
 	}
 
 	private static byte[] jpeg(BufferedImage image, float quality) throws IOException

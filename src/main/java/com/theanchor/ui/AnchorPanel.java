@@ -25,6 +25,7 @@ import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.RenderingHints;
+import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.ComponentAdapter;
@@ -53,6 +54,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
+import javax.swing.Scrollable;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
 import javax.swing.SpinnerNumberModel;
@@ -61,9 +63,10 @@ import javax.swing.SwingUtilities;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.game.SpriteManager;
+import net.runelite.client.game.ItemManager;
+import net.runelite.client.util.AsyncBufferedImage;
 
-public class AnchorPanel extends PluginPanel
-{
+public class AnchorPanel extends PluginPanel {
 	private static final Color GOLD = new Color(207, 164, 76);
 	private static final Color TAB_BG = new Color(30, 33, 36);
 	private static final Color TAB_ACTIVE_BG = new Color(207, 164, 76);
@@ -79,7 +82,7 @@ public class AnchorPanel extends PluginPanel
 	private static final Color SCORE_COLOR = new Color(238, 205, 124);
 	private static final int NAV_BUTTON_HEIGHT = 27;
 	private static final Color[] RANK_COLORS = {
-		new Color(238, 193, 73), new Color(185, 195, 204), new Color(190, 126, 75)
+			new Color(238, 193, 73), new Color(185, 195, 204), new Color(190, 126, 75)
 	};
 	private final AnchorDataService data;
 	private final EvidenceStore evidence;
@@ -87,6 +90,7 @@ public class AnchorPanel extends PluginPanel
 	private final AnchorConfig config;
 	private final ConfigManager configManager;
 	private final SpriteManager spriteManager;
+	private final ItemManager itemManager;
 	private final Runnable dataListener = this::refreshOnEdt;
 	private final JLabel banner = new AspectRatioIconLabel();
 	private final JLabel avatar = new JLabel();
@@ -106,12 +110,18 @@ public class AnchorPanel extends PluginPanel
 
 	@Inject
 	public AnchorPanel(AnchorDataService data, EvidenceStore evidence, EventPipeline pipeline,
-		AnchorConfig config, ConfigManager configManager, SpriteManager spriteManager)
-	{
-		super(false); this.data = data; this.evidence = evidence; this.pipeline = pipeline; this.config = config;
+			AnchorConfig config, ConfigManager configManager, SpriteManager spriteManager, ItemManager itemManager) {
+		super(false);
+		this.data = data;
+		this.evidence = evidence;
+		this.pipeline = pipeline;
+		this.config = config;
 		this.configManager = configManager;
 		this.spriteManager = spriteManager;
-		setLayout(new BorderLayout()); setBackground(ColorScheme.DARK_GRAY_COLOR); setBorder(null);
+		this.itemManager = itemManager;
+		setLayout(new BorderLayout());
+		setBackground(ColorScheme.DARK_GRAY_COLOR);
+		setBorder(null);
 
 		JPanel header = new JPanel(new GridBagLayout());
 		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -129,8 +139,8 @@ public class AnchorPanel extends PluginPanel
 		JPanel profile = new JPanel(new BorderLayout(8, 0));
 		profile.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		profile.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(67, 70, 73)),
-			BorderFactory.createEmptyBorder(8, 8, 8, 8)));
+				BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(67, 70, 73)),
+				BorderFactory.createEmptyBorder(8, 8, 8, 8)));
 		avatar.setPreferredSize(new Dimension(58, 58));
 		avatar.setIcon(new ImageIcon(scale(placeholderAvatar(), 58, 58)));
 		profile.add(avatar, BorderLayout.WEST);
@@ -151,7 +161,8 @@ public class AnchorPanel extends PluginPanel
 		headerRow.gridy++;
 		header.add(profile, headerRow);
 
-		// Navigation: two tabs on the first row, one full-width settings row beneath them.
+		// Navigation: two tabs on the first row, one full-width settings row beneath
+		// them.
 		JPanel navigation = fullWidthVerticalPanel();
 		navigation.setLayout(new GridBagLayout());
 		navigation.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -176,11 +187,12 @@ public class AnchorPanel extends PluginPanel
 
 		add(header, BorderLayout.NORTH);
 		add(contentPanel, BorderLayout.CENTER);
-		data.addListener(dataListener); pipeline.addListener(dataListener); refresh();
+		data.addListener(dataListener);
+		pipeline.addListener(dataListener);
+		refresh();
 	}
 
-	private JPanel buildExtraSettings()
-	{
+	private JPanel buildExtraSettings() {
 		JPanel container = fullWidthVerticalPanel();
 		container.setAlignmentX(Component.LEFT_ALIGNMENT);
 		container.setBorder(BorderFactory.createEmptyBorder(8, 8, 6, 8));
@@ -188,7 +200,8 @@ public class AnchorPanel extends PluginPanel
 		extraSettingsButton.setAlignmentX(Component.LEFT_ALIGNMENT);
 		extraSettingsButton.setMinimumSize(new Dimension(0, NAV_BUTTON_HEIGHT));
 		extraSettingsButton.setPreferredSize(new Dimension(0, NAV_BUTTON_HEIGHT));
-		extraSettingsButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, extraSettingsButton.getPreferredSize().height));
+		extraSettingsButton
+				.setMaximumSize(new Dimension(Integer.MAX_VALUE, extraSettingsButton.getPreferredSize().height));
 		extraSettingsButton.addActionListener(e -> toggleExtraSettings());
 		container.add(extraSettingsButton);
 
@@ -212,20 +225,18 @@ public class AnchorPanel extends PluginPanel
 		return container;
 	}
 
-	private JButton configActionButton(String text, String key, boolean primary)
-	{
+	private JButton configActionButton(String text, String key, boolean primary) {
 		JButton button = actionButton(text, primary);
-		button.addActionListener(e ->
-		{
-			// Always generate a change event, even if an older plugin version left this key set.
+		button.addActionListener(e -> {
+			// Always generate a change event, even if an older plugin version left this key
+			// set.
 			configManager.setConfiguration(AnchorConfig.GROUP, key, false);
 			configManager.setConfiguration(AnchorConfig.GROUP, key, true);
 		});
 		return button;
 	}
 
-	private void toggleExtraSettings()
-	{
+	private void toggleExtraSettings() {
 		extraSettingsVisible = !extraSettingsVisible;
 		extraSettings.setVisible(extraSettingsVisible);
 		extraSettingsButton.setText(extraSettingsVisible ? "Hide Extra Settings" : "Extra Settings");
@@ -233,13 +244,10 @@ public class AnchorPanel extends PluginPanel
 		repaint();
 	}
 
-	private JPanel buildTabBar()
-	{
-		JPanel bar = new JPanel(new GridLayout(1, 2, 2, 0))
-		{
+	private JPanel buildTabBar() {
+		JPanel bar = new JPanel(new GridLayout(1, 2, 2, 0)) {
 			@Override
-			protected void paintComponent(Graphics g)
-			{
+			protected void paintComponent(Graphics g) {
 				Graphics2D g2 = (Graphics2D) g.create();
 				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 				g2.setColor(TAB_BG);
@@ -259,19 +267,43 @@ public class AnchorPanel extends PluginPanel
 
 		homeTab.addMouseListener(new MouseAdapter() {
 			@Override
-			public void mouseClicked(MouseEvent e) { switchTab("Home"); }
+			public void mouseClicked(MouseEvent e) {
+				switchTab("Home");
+			}
+
 			@Override
-			public void mouseEntered(MouseEvent e) { if (!activeTab.equals("Home")) homeTab.setBackground(TAB_HOVER_BG); homeTab.repaint(); }
+			public void mouseEntered(MouseEvent e) {
+				if (!activeTab.equals("Home"))
+					homeTab.setBackground(TAB_HOVER_BG);
+				homeTab.repaint();
+			}
+
 			@Override
-			public void mouseExited(MouseEvent e) { if (!activeTab.equals("Home")) homeTab.setBackground(TAB_BG); homeTab.repaint(); }
+			public void mouseExited(MouseEvent e) {
+				if (!activeTab.equals("Home"))
+					homeTab.setBackground(TAB_BG);
+				homeTab.repaint();
+			}
 		});
 		submissionsTab.addMouseListener(new MouseAdapter() {
 			@Override
-			public void mouseClicked(MouseEvent e) { switchTab("Submissions"); }
+			public void mouseClicked(MouseEvent e) {
+				switchTab("Submissions");
+			}
+
 			@Override
-			public void mouseEntered(MouseEvent e) { if (!activeTab.equals("Submissions")) submissionsTab.setBackground(TAB_HOVER_BG); submissionsTab.repaint(); }
+			public void mouseEntered(MouseEvent e) {
+				if (!activeTab.equals("Submissions"))
+					submissionsTab.setBackground(TAB_HOVER_BG);
+				submissionsTab.repaint();
+			}
+
 			@Override
-			public void mouseExited(MouseEvent e) { if (!activeTab.equals("Submissions")) submissionsTab.setBackground(TAB_BG); submissionsTab.repaint(); }
+			public void mouseExited(MouseEvent e) {
+				if (!activeTab.equals("Submissions"))
+					submissionsTab.setBackground(TAB_BG);
+				submissionsTab.repaint();
+			}
 		});
 
 		bar.add(homeTab);
@@ -279,13 +311,10 @@ public class AnchorPanel extends PluginPanel
 		return bar;
 	}
 
-	private static JLabel createTabLabel(String text, boolean active)
-	{
-		JLabel label = new JLabel(text, SwingConstants.CENTER)
-		{
+	private static JLabel createTabLabel(String text, boolean active) {
+		JLabel label = new JLabel(text, SwingConstants.CENTER) {
 			@Override
-			protected void paintComponent(Graphics g)
-			{
+			protected void paintComponent(Graphics g) {
 				Graphics2D g2 = (Graphics2D) g.create();
 				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 				g2.setColor(getBackground());
@@ -300,22 +329,19 @@ public class AnchorPanel extends PluginPanel
 		label.setPreferredSize(new Dimension(0, NAV_BUTTON_HEIGHT));
 		label.setMaximumSize(new Dimension(Integer.MAX_VALUE, NAV_BUTTON_HEIGHT));
 		label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		if (active)
-		{
+		if (active) {
 			label.setBackground(TAB_ACTIVE_BG);
 			label.setForeground(TAB_ACTIVE_FG);
-		}
-		else
-		{
+		} else {
 			label.setBackground(TAB_BG);
 			label.setForeground(TAB_INACTIVE_FG);
 		}
 		return label;
 	}
 
-	private void switchTab(String tabName)
-	{
-		if (activeTab.equals(tabName)) return;
+	private void switchTab(String tabName) {
+		if (activeTab.equals(tabName))
+			return;
 		activeTab = tabName;
 
 		homeTab.setBackground(tabName.equals("Home") ? TAB_ACTIVE_BG : TAB_BG);
@@ -328,63 +354,74 @@ public class AnchorPanel extends PluginPanel
 		contentCards.show(contentPanel, tabName);
 	}
 
-	private void refreshOnEdt() { SwingUtilities.invokeLater(this::refresh); }
-	public void refreshBanner()
-	{
-		Runnable update = () ->
-		{
+	private void refreshOnEdt() {
+		SwingUtilities.invokeLater(this::refresh);
+	}
+
+	public void refreshBanner() {
+		Runnable update = () -> {
 			banner.setIcon(loadBannerIcon(config.animatedBanner()));
 			((AspectRatioIconLabel) banner).refreshAspectRatio();
 			banner.revalidate();
 			banner.repaint();
 		};
-		if (SwingUtilities.isEventDispatchThread()) update.run(); else SwingUtilities.invokeLater(update);
+		if (SwingUtilities.isEventDispatchThread())
+			update.run();
+		else
+			SwingUtilities.invokeLater(update);
 	}
 
-	private void refresh()
-	{
+	private void refresh() {
 		AnchorModels.Profile profile = data.profile();
-		if (profile == null || profile.member == null)
-		{
-			identity.setText("The Anchor"); status.setText(html(data.message())); avatar.setIcon(new ImageIcon(scale(placeholderAvatar(), 58, 58)));
-		}
-		else
-		{
+		if (profile == null || profile.member == null) {
+			identity.setText("The Anchor");
+			status.setText(html(data.message()));
+			avatar.setIcon(new ImageIcon(scale(placeholderAvatar(), 58, 58)));
+		} else {
 			String rank = profile.standings == null ? "—" : value(profile.standings.currentRank);
 			identity.setText(html("<b>" + esc(profile.member.name) + "</b><br><span style='color:#eecd7c'>"
-				+ esc(rank) + "</span>"));
+					+ esc(rank) + "</span>"));
 			String memberStatus = value(profile.member.rosterRank);
-			if (profile.member.status != null && !profile.member.status.isBlank())
-			{
+			if (profile.member.status != null && !profile.member.status.isBlank()) {
 				memberStatus += " · " + profile.member.status;
 			}
 			status.setText(html("<span style='color:#9da1a4'>" + esc(memberStatus) + "</span>"));
-			avatar.setIcon(new ImageIcon(scale(data.profileImage() == null ? placeholderAvatar() : data.profileImage(), 58, 58)));
+			avatar.setIcon(new ImageIcon(
+					scale(data.profileImage() == null ? placeholderAvatar() : data.profileImage(), 58, 58)));
 		}
 		updateConnectionDot();
-		rebuildHome(); rebuildSubmissions(); revalidate(); repaint();
+		rebuildHome();
+		rebuildSubmissions();
+		revalidate();
+		repaint();
 	}
 
-	private void updateConnectionDot()
-	{
+	private void updateConnectionDot() {
 		AnchorDataService.Connection conn = data.connection();
 		boolean connected = conn == AnchorDataService.Connection.CONNECTED;
 		Color dotColor = connected ? CONNECTED_COLOR : DISCONNECTED_COLOR;
 		String tooltip;
-		switch (conn)
-		{
-			case CONNECTED: tooltip = "Connected"; break;
-			case CHECKING: tooltip = "Checking code…"; break;
-			case INVALID: tooltip = "Invalid code"; break;
-			case UNAVAILABLE: tooltip = "Unavailable"; break;
-			default: tooltip = "Not connected";
+		switch (conn) {
+			case CONNECTED:
+				tooltip = "Connected";
+				break;
+			case CHECKING:
+				tooltip = "Checking code…";
+				break;
+			case INVALID:
+				tooltip = "Invalid code";
+				break;
+			case UNAVAILABLE:
+				tooltip = "Unavailable";
+				break;
+			default:
+				tooltip = "Not connected";
 		}
 		connectionDot.setToolTipText(tooltip);
 		connectionDot.setIcon(new ImageIcon(createDotImage(dotColor)));
 	}
 
-	private static BufferedImage createDotImage(Color color)
-	{
+	private static BufferedImage createDotImage(Color color) {
 		int size = 10;
 		BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D g = img.createGraphics();
@@ -395,121 +432,127 @@ public class AnchorPanel extends PluginPanel
 		return img;
 	}
 
-	private void rebuildHome()
-	{
-		home.removeAll(); AnchorModels.Profile profile = data.profile();
-		if (profile != null && profile.standings != null)
-		{
-			AnchorModels.Standings s = profile.standings; JPanel ranks = card();
+	private void rebuildHome() {
+		home.removeAll();
+		AnchorModels.Profile profile = data.profile();
+		if (profile != null && profile.standings != null) {
+			AnchorModels.Standings s = profile.standings;
+			JPanel ranks = card();
 			ranks.add(sectionHeading("CLAN PROFILE"));
 			ranks.add(Box.createVerticalStrut(5));
 			ranks.add(statRow("PVM RANK", rank(s.pvmRank), PVM_ACCENT,
-				"CLAN RANK", rank(s.clanRank), CLAN_ACCENT));
+					"CLAN RANK", rank(s.clanRank), CLAN_ACCENT));
 			ranks.add(Box.createVerticalStrut(4));
 			ranks.add(statRow("PVM POINTS", number(s.pvmPoints), PVM_ACCENT,
-				"CLAN POINTS", number(s.clanPoints), CLAN_ACCENT));
-			if (s.nextRank != null)
-			{
+					"CLAN POINTS", number(s.clanPoints), CLAN_ACCENT));
+			if (s.nextRank != null) {
 				ranks.add(Box.createVerticalStrut(7));
 				ranks.add(nextRank(value(s.nextRank.name)));
 				ranks.add(Box.createVerticalStrut(4));
 				ranks.add(progress("PvM", s.pvmPoints, s.nextRank.pvmPointsRemaining, PVM_ACCENT));
 				ranks.add(Box.createVerticalStrut(3));
 				ranks.add(progress("Clan", s.clanPoints, s.nextRank.clanPointsRemaining, CLAN_ACCENT));
-			}
-			else ranks.add(muted("Administrative or highest rank"));
-			home.add(ranks); home.add(Box.createVerticalStrut(8));
+			} else
+				ranks.add(muted("Administrative or highest rank"));
+			home.add(ranks);
+			home.add(Box.createVerticalStrut(8));
 		}
 		AnchorModels.CompetitionPanels competitions = data.competitionPanels();
 		String weeklyTiming = sharedCompetitionTiming(competitions);
-		if (!weeklyTiming.isEmpty())
-		{
+		if (!weeklyTiming.isEmpty()) {
 			home.add(weeklyTimer(weeklyTiming));
 			home.add(Box.createVerticalStrut(8));
 		}
 		AnchorModels.Standings standings = profile == null ? null : profile.standings;
 		String playerName = profile == null || profile.member == null ? null : profile.member.name;
 		home.add(competition("BOTW", competitions == null ? null : competitions.botw, data.botwImage(),
-			standings == null ? null : standings.botwRank, playerName));
+				standings == null ? null : standings.botwRank, playerName));
 		home.add(Box.createVerticalStrut(8));
 		home.add(competition("SOTW", competitions == null ? null : competitions.sotw, data.sotwImage(),
-			standings == null ? null : standings.sotwRank, playerName));
+				standings == null ? null : standings.sotwRank, playerName));
 	}
 
 	private JPanel competition(String kind, AnchorModels.CompetitionPanel competition, BufferedImage image,
-		AnchorModels.CompetitionRank playerRank, String playerName)
-	{
+			AnchorModels.CompetitionRank playerRank, String playerName) {
 		JPanel card = card();
 		int cardContentWidth = PANEL_WIDTH - 32;
-		BufferedImage scaledArtwork = scaleToWidth(image == null ? placeholderCompetition(kind) : image, cardContentWidth);
+		BufferedImage scaledArtwork = scaleToWidth(image == null ? placeholderCompetition(kind) : image,
+				cardContentWidth);
 		JLabel artwork = new AspectRatioIconLabel();
 		artwork.setIcon(new ImageIcon(scaledArtwork));
 		artwork.setAlignmentX(Component.LEFT_ALIGNMENT);
-		card.add(artwork); card.add(Box.createVerticalStrut(5));
+		card.add(artwork);
+		card.add(Box.createVerticalStrut(5));
 		boolean upcoming = isUpcoming(competition);
 		boolean finished = isFinished(competition);
-		if (competition == null) { card.add(muted("Competition data is currently unavailable")); return card; }
-		if (upcoming)
-		{
+		if (competition == null) {
+			card.add(muted("Competition data is currently unavailable"));
+			return card;
+		}
+		if (upcoming) {
 			Color accent = "BOTW".equals(kind) ? BOTW_ACCENT : SOTW_ACCENT;
 			card.add(competitionSectionHeading("UPCOMING", accent));
 			card.add(Box.createVerticalStrut(3));
 			card.add(muted(startsCountdown(competition.startsAt)));
 			return card;
 		}
-		List<AnchorModels.PanelLeader> leaders = competition.leaders == null ? java.util.Collections.emptyList() : competition.leaders;
+		List<AnchorModels.PanelLeader> leaders = competition.leaders == null ? java.util.Collections.emptyList()
+				: competition.leaders;
 		long leadingScore = leaders.stream().mapToLong(leader -> Math.max(0, leader.gained)).max().orElse(0);
 		Color accent = "BOTW".equals(kind) ? BOTW_ACCENT : SOTW_ACCENT;
 		boolean showPersonalProgress = !finished
-			|| (playerRank != null && playerRank.rank != null && playerRank.rank <= 3);
-		if (showPersonalProgress)
-		{
+				|| (playerRank != null && playerRank.rank != null && playerRank.rank <= 3);
+		if (showPersonalProgress) {
 			card.add(competitionSectionHeading("YOUR PROGRESS", accent));
 			card.add(Box.createVerticalStrut(3));
-			if (playerRank == null || playerRank.rank == null)
-			{
+			if (playerRank == null || playerRank.rank == null) {
 				card.add(muted("No personal progress yet"));
-			}
-			else
-			{
+			} else {
 				String score = playerRank.displayValue == null || playerRank.displayValue.isBlank()
-					? number(playerRank.gained) + " " + value(playerRank.unit == null ? competition.unit : playerRank.unit)
-					: playerRank.displayValue;
+						? number(playerRank.gained) + " "
+								+ value(playerRank.unit == null ? competition.unit : playerRank.unit)
+						: playerRank.displayValue;
 				card.add(leaderRow(playerRank.rank, value(playerName), score,
-					leadingScore == 0 ? 0 : (double) Math.max(0, playerRank.gained) / leadingScore, accent, true));
+						leadingScore == 0 ? 0 : (double) Math.max(0, playerRank.gained) / leadingScore, accent, true));
 			}
 			card.add(Box.createVerticalStrut(6));
 		}
 
 		card.add(competitionSectionHeading(finished ? "WINNERS" : "LEADERBOARD", SCORE_COLOR));
 		card.add(Box.createVerticalStrut(3));
-		for (int i = 0; i < Math.min(3, leaders.size()); i++)
-		{
+		for (int i = 0; i < Math.min(3, leaders.size()); i++) {
 			AnchorModels.PanelLeader leader = leaders.get(i);
-			String nameValue = leader.displayName == null || leader.displayName.isBlank() ? value(leader.username) : leader.displayName;
+			String nameValue = leader.displayName == null || leader.displayName.isBlank() ? value(leader.username)
+					: leader.displayName;
 			String score = leader.displayValue == null || leader.displayValue.isBlank()
-				? number(leader.gained) + " " + value(leader.unit == null ? competition.unit : leader.unit) : leader.displayValue;
+					? number(leader.gained) + " " + value(leader.unit == null ? competition.unit : leader.unit)
+					: leader.displayValue;
 			card.add(leaderRow(leader.rank > 0 ? leader.rank : i + 1, nameValue, score,
-				leadingScore == 0 ? 0 : (double) Math.max(0, leader.gained) / leadingScore, accent, false));
-			if (i < Math.min(3, leaders.size()) - 1) card.add(Box.createVerticalStrut(3));
+					leadingScore == 0 ? 0 : (double) Math.max(0, leader.gained) / leadingScore, accent, false));
+			if (i < Math.min(3, leaders.size()) - 1)
+				card.add(Box.createVerticalStrut(3));
 		}
-		if (leaders.isEmpty())
-		{
+		if (leaders.isEmpty()) {
 			card.add(muted(finished ? "No completed competition history" : "No leaderboard history yet"));
 		}
 		return card;
 	}
 
-	private void rebuildSubmissions()
-	{
-		submissions.removeAll(); List<EvidenceStore.Record> records = evidence.records();
-		if (records.isEmpty()) { submissions.add(muted("Drops, personal bests, collection log entries, pets, and combat achievements will appear here.")); return; }
-		for (EvidenceStore.Record record : records)
-		{
+	private void rebuildSubmissions() {
+		submissions.removeAll();
+		List<EvidenceStore.Record> records = evidence.records();
+		if (records.isEmpty()) {
+			submissions.add(muted(
+					"Drops, personal bests, collection log entries, pets, and combat achievements will appear here."));
+			return;
+		}
+		for (EvidenceStore.Record record : records) {
 			JPanel card = card();
 			card.add(submissionHeading(record));
-			if (record.error != null) card.add(wrappedMuted(record.error));
-			JSpinner party = new JSpinner(new SpinnerNumberModel(record.metadata.party == null ? 1 : record.metadata.party.submittedPartySize, 1, 100, 1));
+			if (record.error != null)
+				card.add(wrappedMuted(record.error));
+			JSpinner party = new JSpinner(new SpinnerNumberModel(
+					record.metadata.party == null ? 1 : record.metadata.party.submittedPartySize, 1, 100, 1));
 			party.setPreferredSize(new Dimension(54, party.getPreferredSize().height));
 			int initialClan = record.metadata.party == null ? 0 : record.metadata.party.submittedClanMemberCount;
 			int initialNonClan = record.metadata.party == null ? 0 : record.metadata.party.submittedNonClanMemberCount;
@@ -517,68 +560,88 @@ public class AnchorPanel extends PluginPanel
 			JSpinner nonClanMembers = new JSpinner(new SpinnerNumberModel(initialNonClan, 0, 100, 1));
 			clanMembers.setPreferredSize(new Dimension(54, clanMembers.getPreferredSize().height));
 			nonClanMembers.setPreferredSize(new Dimension(54, nonClanMembers.getPreferredSize().height));
-			JTextField notes = new JTextField(); notes.setToolTipText("Optional submission notes"); notes.setMaximumSize(new Dimension(Integer.MAX_VALUE, notes.getPreferredSize().height));
-			// PB records may have legacy party metadata, but party splits only apply to qualifying loot.
-			if (record.metadata.party != null && !isPersonalBest(record))
-			{
+			JTextField notes = new JTextField();
+			notes.setToolTipText("Optional submission notes");
+			notes.setMaximumSize(new Dimension(Integer.MAX_VALUE, notes.getPreferredSize().height));
+			// PB records may have legacy party metadata, but party splits only apply to
+			// qualifying loot.
+			if (record.metadata.party != null && !isPersonalBest(record)) {
 				card.add(Box.createVerticalStrut(4));
 				card.add(fieldRow("Party size", party));
 				card.add(fieldRow("Clan members", clanMembers));
 				card.add(fieldRow("Non-clan members", nonClanMembers));
 				card.add(muted("Detected via " + friendlyMethod(record.metadata.party.method)));
 				int unknown = Math.max(0, record.metadata.party.detectedPartySize
-					- record.metadata.party.detectedClanMemberCount - record.metadata.party.detectedNonClanMemberCount);
+						- record.metadata.party.detectedClanMemberCount
+						- record.metadata.party.detectedNonClanMemberCount);
 				if (unknown > 0 && !"fixed_solo".equals(record.metadata.party.method))
 					card.add(muted(unknown + " participant" + (unknown == 1 ? "" : "s") + " could not be classified"));
 				String memberNames = partyMemberNames(record.metadata.party);
-				if (!memberNames.isEmpty()) card.add(wrappedMuted(memberNames));
+				if (!memberNames.isEmpty())
+					card.add(wrappedMuted(memberNames));
 			}
-			if (record.status == AnchorModels.EventStatus.DRAFT) { card.add(Box.createVerticalStrut(4)); card.add(label("Notes", false)); card.add(notes); }
-			JPanel actions = new JPanel(new GridLayout(0, 2, 6, 0));
-			actions.setOpaque(false);
-			actions.setAlignmentX(Component.LEFT_ALIGNMENT);
-			JButton proof = actionButton("View proof", false); proof.addActionListener(e -> showProof(record)); actions.add(proof);
-			if (record.status == AnchorModels.EventStatus.FAILED || record.status == AnchorModels.EventStatus.PENDING) { JButton retry = actionButton("Retry", true); retry.addActionListener(e -> pipeline.upload(record, true)); actions.add(retry); }
-			if (record.status == AnchorModels.EventStatus.DRAFT)
-			{
+			if (record.status == AnchorModels.EventStatus.DRAFT) {
+				card.add(Box.createVerticalStrut(4));
+				card.add(label("Notes", false));
+				card.add(notes);
+			}
+			List<JButton> actionButtons = new java.util.ArrayList<>();
+			JButton proof = actionButton("View proof", false);
+			proof.addActionListener(e -> showProof(record));
+			actionButtons.add(proof);
+			if (record.status == AnchorModels.EventStatus.FAILED || record.status == AnchorModels.EventStatus.PENDING) {
+				JButton retry = actionButton("Retry", true);
+				retry.addActionListener(e -> pipeline.upload(record, true));
+				actionButtons.add(retry);
+			}
+			if (record.status == AnchorModels.EventStatus.DRAFT) {
 				JButton submit = actionButton("Submit", true);
-				submit.addActionListener(e ->
-				{
+				submit.addActionListener(e -> {
 					int partySize = (Integer) party.getValue();
 					int clanCount = (Integer) clanMembers.getValue();
 					int nonClanCount = (Integer) nonClanMembers.getValue();
-					if (clanCount + nonClanCount > partySize)
-					{
+					if (clanCount + nonClanCount > partySize) {
 						JOptionPane.showMessageDialog(this, "Clan and non-clan members cannot exceed party size.");
 						return;
 					}
 					pipeline.updateAndSubmit(record, partySize, clanCount, nonClanCount, notes.getText());
 				});
-				actions.add(submit);
+				actionButtons.add(submit);
 			}
-			JButton discard = actionButton("Discard", false); discard.addActionListener(e -> { if (JOptionPane.showConfirmDialog(this, "Remove this local evidence?", "Discard", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) { evidence.deleteLocal(record.metadata.eventId); refresh(); } }); actions.add(discard);
-			actions.setMaximumSize(new Dimension(Integer.MAX_VALUE, actions.getPreferredSize().height));
+			JButton discard = actionButton("Discard", false);
+			discard.addActionListener(e -> {
+				if (JOptionPane.showConfirmDialog(this, "Remove this local evidence?", "Discard",
+						JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+					evidence.deleteLocal(record.metadata.eventId);
+					refresh();
+				}
+			});
+			actionButtons.add(discard);
+			JPanel actions = actionGrid(actionButtons);
 			card.add(Box.createVerticalStrut(5));
-			card.add(actions); submissions.add(card); submissions.add(Box.createVerticalStrut(7));
+			card.add(actions);
+			submissions.add(card);
+			submissions.add(Box.createVerticalStrut(7));
 		}
 	}
 
-	private static String partyMemberNames(AnchorModels.Party party)
-	{
-		if (party == null || party.members == null || party.members.isEmpty()) return "";
+	private static String partyMemberNames(AnchorModels.Party party) {
+		if (party == null || party.members == null || party.members.isEmpty())
+			return "";
 		StringBuilder names = new StringBuilder("Party: ");
-		for (AnchorModels.PartyMember member : party.members)
-		{
-			if (member == null || member.name == null || member.name.isBlank()) continue;
-			if (names.length() > 7) names.append(", ");
+		for (AnchorModels.PartyMember member : party.members) {
+			if (member == null || member.name == null || member.name.isBlank())
+				continue;
+			if (names.length() > 7)
+				names.append(", ");
 			names.append(member.name);
-			if (member.clanMember != null) names.append(Boolean.TRUE.equals(member.clanMember) ? " [clan]" : " [guest]");
+			if (member.clanMember != null)
+				names.append(Boolean.TRUE.equals(member.clanMember) ? " [clan]" : " [guest]");
 		}
 		return names.length() == 7 ? "" : names.toString();
 	}
 
-	private JPanel submissionHeading(EvidenceStore.Record record)
-	{
+	private JPanel submissionHeading(EvidenceStore.Record record) {
 		JPanel heading = new JPanel(new BorderLayout(7, 0));
 		heading.setOpaque(false);
 		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -593,21 +656,55 @@ public class AnchorPanel extends PluginPanel
 		text.add(title);
 		heading.add(text, BorderLayout.CENTER);
 		heading.add(statusBadge(record.status), BorderLayout.EAST);
+		Integer itemId = submissionItemId(record);
 		String activity = pbActivity(record);
-		if (activity != null)
-		{
+		if (itemId != null) {
 			JLabel icon = new JLabel();
 			icon.setPreferredSize(new Dimension(30, 30));
 			icon.setHorizontalAlignment(SwingConstants.CENTER);
-			BossIcons.get(spriteManager, activity, loaded -> { icon.setIcon(loaded); icon.repaint(); });
+			AsyncBufferedImage image = itemManager.getImage(itemId);
+			Runnable update = () -> {
+				icon.setIcon(new ImageIcon(scale(image, 28, 28)));
+				icon.repaint();
+			};
+			update.run();
+			image.onLoaded(() -> SwingUtilities.invokeLater(update));
+			heading.add(icon, BorderLayout.WEST);
+		} else if (activity != null) {
+			JLabel icon = new JLabel();
+			icon.setPreferredSize(new Dimension(30, 30));
+			icon.setHorizontalAlignment(SwingConstants.CENTER);
+			BossIcons.get(spriteManager, activity, loaded -> {
+				icon.setIcon(loaded);
+				icon.repaint();
+			});
 			heading.add(icon, BorderLayout.WEST);
 		}
 		heading.setMaximumSize(new Dimension(Integer.MAX_VALUE, Math.max(32, heading.getPreferredSize().height)));
 		return heading;
 	}
 
-	private static JButton actionButton(String text, boolean primary)
-	{
+	private static JPanel actionGrid(List<JButton> buttons) {
+		JPanel panel = new JPanel(new GridBagLayout());
+		panel.setOpaque(false);
+		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		for (int i = 0; i < buttons.size(); i++) {
+			boolean fullWidthLast = buttons.size() % 2 == 1 && i == buttons.size() - 1;
+			GridBagConstraints constraints = new GridBagConstraints();
+			constraints.gridx = fullWidthLast ? 0 : i % 2;
+			constraints.gridy = i / 2;
+			constraints.gridwidth = fullWidthLast ? 2 : 1;
+			constraints.weightx = fullWidthLast ? 2.0 : 1.0;
+			constraints.fill = GridBagConstraints.HORIZONTAL;
+			constraints.insets = fullWidthLast ? new Insets(i >= 2 ? 4 : 0, 0, 0, 0)
+					: new Insets(i >= 2 ? 4 : 0, i % 2 == 1 ? 3 : 0, 0, i % 2 == 0 ? 3 : 0);
+			panel.add(buttons.get(i), constraints);
+		}
+		panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getPreferredSize().height));
+		return panel;
+	}
+
+	private static JButton actionButton(String text, boolean primary) {
 		JButton button = new JButton(text);
 		button.setForeground(primary ? TAB_ACTIVE_FG : new Color(205, 208, 211));
 		button.setFont(button.getFont().deriveFont(Font.BOLD, 11f));
@@ -620,16 +717,17 @@ public class AnchorPanel extends PluginPanel
 		button.setPreferredSize(new Dimension(0, 27));
 		button.setBackground(primary ? GOLD : new Color(47, 51, 55));
 		button.setRolloverEnabled(true);
-		button.setUI(new javax.swing.plaf.basic.BasicButtonUI()
-		{
-			@Override public void paint(Graphics graphics, javax.swing.JComponent component)
-			{
+		button.setUI(new javax.swing.plaf.basic.BasicButtonUI() {
+			@Override
+			public void paint(Graphics graphics, javax.swing.JComponent component) {
 				JButton target = (JButton) component;
 				Graphics2D g = (Graphics2D) graphics.create();
 				g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 				Color background = target.getBackground();
-				if (target.getModel().isPressed()) background = background.darker();
-				else if (target.getModel().isRollover()) background = primary ? new Color(224, 181, 91) : TAB_HOVER_BG;
+				if (target.getModel().isPressed())
+					background = background.darker();
+				else if (target.getModel().isRollover())
+					background = primary ? new Color(224, 181, 91) : TAB_HOVER_BG;
 				g.setColor(background);
 				g.fillRoundRect(0, 0, target.getWidth(), target.getHeight(), 8, 8);
 				g.dispose();
@@ -639,22 +737,24 @@ public class AnchorPanel extends PluginPanel
 		return button;
 	}
 
-	private static JLabel statusBadge(AnchorModels.EventStatus status)
-	{
+	private static JLabel statusBadge(AnchorModels.EventStatus status) {
 		String text = status == null ? "UNKNOWN" : status.name();
-		Color color = status == AnchorModels.EventStatus.SUBMITTED || status == AnchorModels.EventStatus.APPROVED ? CONNECTED_COLOR
-			: status == AnchorModels.EventStatus.FAILED || status == AnchorModels.EventStatus.REJECTED ? new Color(194, 83, 80)
-			: status == AnchorModels.EventStatus.DRAFT ? GOLD : new Color(150, 154, 158);
+		Color color = status == AnchorModels.EventStatus.SUBMITTED || status == AnchorModels.EventStatus.APPROVED
+				? CONNECTED_COLOR
+				: status == AnchorModels.EventStatus.FAILED || status == AnchorModels.EventStatus.REJECTED
+						? new Color(194, 83, 80)
+						: status == AnchorModels.EventStatus.DRAFT ? GOLD : new Color(150, 154, 158);
 		JLabel badge = new JLabel(text, SwingConstants.CENTER);
 		badge.setForeground(color);
 		badge.setFont(badge.getFont().deriveFont(Font.BOLD, 10f));
-		badge.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(color.getRed(), color.getGreen(), color.getBlue(), 135)), BorderFactory.createEmptyBorder(3, 6, 3, 6)));
+		badge.setBorder(BorderFactory.createCompoundBorder(
+				BorderFactory.createLineBorder(new Color(color.getRed(), color.getGreen(), color.getBlue(), 135)),
+				BorderFactory.createEmptyBorder(3, 6, 3, 6)));
 		badge.setAlignmentY(Component.CENTER_ALIGNMENT);
 		return badge;
 	}
 
-	private static JPanel fieldRow(String name, Component field)
-	{
+	private static JPanel fieldRow(String name, Component field) {
 		JPanel row = new JPanel(new BorderLayout(8, 0));
 		row.setOpaque(false);
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -666,12 +766,11 @@ public class AnchorPanel extends PluginPanel
 		return row;
 	}
 
-	private void showProof(EvidenceStore.Record record)
-	{
-		try
-		{
+	private void showProof(EvidenceStore.Record record) {
+		try {
 			BufferedImage image = ImageIO.read(Path.of(record.screenshotPath).toFile());
-			if (image == null) throw new IllegalArgumentException("Unsupported evidence image");
+			if (image == null)
+				throw new IllegalArgumentException("Unsupported evidence image");
 			Window owner = SwingUtilities.getWindowAncestor(this);
 			JDialog dialog = new JDialog(owner, "Evidence", Dialog.ModalityType.APPLICATION_MODAL);
 			dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
@@ -682,18 +781,22 @@ public class AnchorPanel extends PluginPanel
 			dialog.setSize(Math.min(900, screen.width - 80), Math.min(700, screen.height - 80));
 			dialog.setLocationRelativeTo(this);
 			dialog.setVisible(true);
+		} catch (Exception e) {
+			JOptionPane.showMessageDialog(this, "Evidence file is unavailable.");
 		}
-		catch (Exception e) { JOptionPane.showMessageDialog(this, "Evidence file is unavailable."); }
 	}
 
-	private static JPanel verticalPanel() { JPanel panel = new JPanel(); panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS)); panel.setBackground(ColorScheme.DARK_GRAY_COLOR); return panel; }
-	private static JPanel fullWidthVerticalPanel()
-	{
-		JPanel panel = new JPanel()
-		{
+	private static JPanel verticalPanel() {
+		JPanel panel = new JPanel();
+		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+		panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		return panel;
+	}
+
+	private static JPanel fullWidthVerticalPanel() {
+		JPanel panel = new JPanel() {
 			@Override
-			public Dimension getMaximumSize()
-			{
+			public Dimension getMaximumSize() {
 				return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
 			}
 		};
@@ -701,13 +804,11 @@ public class AnchorPanel extends PluginPanel
 		panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		return panel;
 	}
-	private static JPanel card()
-	{
-		JPanel panel = new JPanel()
-		{
+
+	private static JPanel card() {
+		JPanel panel = new JPanel() {
 			@Override
-			public Dimension getMaximumSize()
-			{
+			public Dimension getMaximumSize() {
 				return new Dimension(Integer.MAX_VALUE, super.getPreferredSize().height);
 			}
 		};
@@ -717,19 +818,74 @@ public class AnchorPanel extends PluginPanel
 		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return panel;
 	}
-	private static JScrollPane scroll(JPanel panel)
-	{
-		JScrollPane scroll = new JScrollPane(panel);
+
+	private static JScrollPane scroll(JPanel panel) {
+		ViewportWidthPanel viewport = new ViewportWidthPanel();
+		viewport.add(panel, BorderLayout.NORTH);
+		JScrollPane scroll = new JScrollPane(viewport);
 		scroll.setBorder(null);
 		scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 		scroll.getVerticalScrollBar().setUnitIncrement(16);
 		return scroll;
 	}
-	private static JLabel label(String text, boolean bold) { JLabel label = new JLabel(html(esc(text))); label.setForeground(Color.WHITE); if (bold) label.setFont(label.getFont().deriveFont(Font.BOLD)); label.setAlignmentX(Component.LEFT_ALIGNMENT); label.setMaximumSize(new Dimension(PANEL_WIDTH, 40)); return label; }
-	private static JLabel muted(String text) { JLabel label = new JLabel(html("<span style='color:#aaaaaa'>" + esc(text) + "</span>")); label.setForeground(Color.LIGHT_GRAY); label.setAlignmentX(Component.LEFT_ALIGNMENT); label.setMaximumSize(new Dimension(PANEL_WIDTH, 40)); return label; }
-	private static JLabel wrappedMuted(String text) { JLabel label = muted(text); label.setMaximumSize(new Dimension(PANEL_WIDTH, Integer.MAX_VALUE)); return label; }
-	private static JPanel row(String leftLabel, String leftValue, String rightLabel, String rightValue)
-	{
+
+	private static final class ViewportWidthPanel extends JPanel implements Scrollable {
+		private ViewportWidthPanel() {
+			super(new BorderLayout());
+			setBackground(ColorScheme.DARK_GRAY_COLOR);
+		}
+
+		@Override
+		public Dimension getPreferredScrollableViewportSize() {
+			return getPreferredSize();
+		}
+
+		@Override
+		public int getScrollableUnitIncrement(Rectangle visible, int orientation, int direction) {
+			return 16;
+		}
+
+		@Override
+		public int getScrollableBlockIncrement(Rectangle visible, int orientation, int direction) {
+			return Math.max(16, visible.height - 16);
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportWidth() {
+			return true;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportHeight() {
+			return false;
+		}
+	}
+
+	private static JLabel label(String text, boolean bold) {
+		JLabel label = new JLabel(html(esc(text)));
+		label.setForeground(Color.WHITE);
+		if (bold)
+			label.setFont(label.getFont().deriveFont(Font.BOLD));
+		label.setAlignmentX(Component.LEFT_ALIGNMENT);
+		label.setMaximumSize(new Dimension(PANEL_WIDTH, 40));
+		return label;
+	}
+
+	private static JLabel muted(String text) {
+		JLabel label = new JLabel(html("<span style='color:#aaaaaa'>" + esc(text) + "</span>"));
+		label.setForeground(Color.LIGHT_GRAY);
+		label.setAlignmentX(Component.LEFT_ALIGNMENT);
+		label.setMaximumSize(new Dimension(PANEL_WIDTH, 40));
+		return label;
+	}
+
+	private static JLabel wrappedMuted(String text) {
+		JLabel label = muted(text);
+		label.setMaximumSize(new Dimension(PANEL_WIDTH, Integer.MAX_VALUE));
+		return label;
+	}
+
+	private static JPanel row(String leftLabel, String leftValue, String rightLabel, String rightValue) {
 		JPanel p = new JPanel(new java.awt.GridLayout(1, 2, 4, 0));
 		p.setOpaque(false);
 		p.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -742,25 +898,25 @@ public class AnchorPanel extends PluginPanel
 		p.add(right);
 		return p;
 	}
-	private static JLabel sectionHeading(String text)
-	{
+
+	private static JLabel sectionHeading(String text) {
 		JLabel heading = new JLabel(text);
 		heading.setForeground(new Color(155, 158, 161));
 		heading.setFont(heading.getFont().deriveFont(Font.BOLD, 12f));
 		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return heading;
 	}
-	private static JLabel competitionSectionHeading(String text, Color color)
-	{
+
+	private static JLabel competitionSectionHeading(String text, Color color) {
 		JLabel heading = new JLabel(text);
 		heading.setForeground(color);
 		heading.setFont(heading.getFont().deriveFont(Font.BOLD, 11f));
 		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return heading;
 	}
+
 	private static JPanel statRow(String leftLabel, String leftValue, Color leftColor,
-		String rightLabel, String rightValue, Color rightColor)
-	{
+			String rightLabel, String rightValue, Color rightColor) {
 		JPanel row = new JPanel(new GridLayout(1, 2, 8, 0));
 		row.setOpaque(false);
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -769,8 +925,8 @@ public class AnchorPanel extends PluginPanel
 		row.add(stat(rightLabel, rightValue, rightColor));
 		return row;
 	}
-	private static JPanel stat(String label, String value, Color color)
-	{
+
+	private static JPanel stat(String label, String value, Color color) {
 		JPanel stat = new JPanel(new BorderLayout(0, 1));
 		stat.setOpaque(false);
 		JLabel name = new JLabel(label);
@@ -783,8 +939,8 @@ public class AnchorPanel extends PluginPanel
 		stat.add(amount, BorderLayout.CENTER);
 		return stat;
 	}
-	private static JPanel nextRank(String rankName)
-	{
+
+	private static JPanel nextRank(String rankName) {
 		JPanel row = new JPanel(new BorderLayout(8, 0));
 		row.setOpaque(false);
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -797,13 +953,13 @@ public class AnchorPanel extends PluginPanel
 		row.add(value, BorderLayout.EAST);
 		return row;
 	}
-	private static JPanel weeklyTimer(String timing)
-	{
+
+	private static JPanel weeklyTimer(String timing) {
 		JPanel p = new JPanel(new BorderLayout(8, 0));
 		p.setBackground(new Color(38, 41, 44));
 		p.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createMatteBorder(0, 3, 0, 0, GOLD),
-			BorderFactory.createEmptyBorder(6, 8, 6, 8)));
+				BorderFactory.createMatteBorder(0, 3, 0, 0, GOLD),
+				BorderFactory.createEmptyBorder(6, 8, 6, 8)));
 		p.setAlignmentX(Component.LEFT_ALIGNMENT);
 		p.setMaximumSize(new Dimension(PANEL_WIDTH, 34));
 		JLabel title = new JLabel("WEEKLY EVENTS");
@@ -816,19 +972,17 @@ public class AnchorPanel extends PluginPanel
 		p.add(value, BorderLayout.EAST);
 		return p;
 	}
+
 	private static JPanel leaderRow(int rank, String name, String score, double progress, Color accent,
-		boolean highlighted)
-	{
-		JPanel p = new JPanel(new BorderLayout(6, 0))
-		{
+			boolean highlighted) {
+		JPanel p = new JPanel(new BorderLayout(6, 0)) {
 			@Override
-			protected void paintComponent(Graphics g)
-			{
+			protected void paintComponent(Graphics g) {
 				super.paintComponent(g);
 				Graphics2D g2 = (Graphics2D) g.create();
 				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 				g2.setColor(highlighted ? new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 38)
-					: new Color(255, 255, 255, 10));
+						: new Color(255, 255, 255, 10));
 				g2.fillRoundRect(0, 0, getWidth(), getHeight(), 6, 6);
 				int barWidth = (int) Math.round(Math.max(0, Math.min(1, progress)) * getWidth());
 				g2.setColor(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 72));
@@ -844,8 +998,8 @@ public class AnchorPanel extends PluginPanel
 
 		JLabel rankLabel = new JLabel(String.valueOf(rank), SwingConstants.CENTER);
 		rankLabel.setForeground(rank <= RANK_COLORS.length
-			? RANK_COLORS[Math.max(0, rank - 1)]
-			: highlighted ? accent : new Color(160, 163, 166));
+				? RANK_COLORS[Math.max(0, rank - 1)]
+				: highlighted ? accent : new Color(160, 163, 166));
 		rankLabel.setFont(rankLabel.getFont().deriveFont(Font.BOLD, 12f));
 		rankLabel.setPreferredSize(new Dimension(18, 18));
 		JLabel nameLabel = new JLabel(name);
@@ -863,37 +1017,37 @@ public class AnchorPanel extends PluginPanel
 		p.add(scoreLabel, BorderLayout.EAST);
 		return p;
 	}
-	private static String styledScore(String score)
-	{
+
+	private static String styledScore(String score) {
 		String escaped = esc(score);
 		int split = escaped.lastIndexOf(' ');
-		if (split < 0) return escaped;
+		if (split < 0)
+			return escaped;
 		return "<html>" + escaped.substring(0, split) + " <span style='color:#9da1a4;font-size:10px'>"
-			+ escaped.substring(split + 1) + "</span></html>";
+				+ escaped.substring(split + 1) + "</span></html>";
 	}
-	private static String sharedCompetitionTiming(AnchorModels.CompetitionPanels competitions)
-	{
-		if (competitions == null) return "";
+
+	private static String sharedCompetitionTiming(AnchorModels.CompetitionPanels competitions) {
+		if (competitions == null)
+			return "";
 		boolean botwUpcoming = competitions.botw != null && isUpcoming(competitions.botw);
 		boolean sotwUpcoming = competitions.sotw != null && isUpcoming(competitions.sotw);
-		if (botwUpcoming && sotwUpcoming)
-		{
+		if (botwUpcoming && sotwUpcoming) {
 			String botwStart = competitions.botw.startsAt;
 			String sotwStart = competitions.sotw.startsAt;
 			return startsCountdown(botwStart == null || botwStart.isBlank() ? sotwStart : botwStart);
 		}
 		boolean botwFinished = competitions.botw != null && isFinished(competitions.botw);
 		boolean sotwFinished = competitions.sotw != null && isFinished(competitions.sotw);
-		if (botwFinished && sotwFinished)
-		{
+		if (botwFinished && sotwFinished) {
 			return "Competitions Ended";
 		}
 		String botwEnd = competitions.botw == null ? null : competitions.botw.endsAt;
 		String sotwEnd = competitions.sotw == null ? null : competitions.sotw.endsAt;
 		return countdown(botwEnd == null || botwEnd.isBlank() ? sotwEnd : botwEnd);
 	}
-	private static JPanel progress(String name, long current, long remaining, Color accent)
-	{
+
+	private static JPanel progress(String name, long current, long remaining, Color accent) {
 		JPanel p = verticalPanel();
 		p.setOpaque(false);
 		p.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -913,200 +1067,281 @@ public class AnchorPanel extends PluginPanel
 		p.add(muted(number(remaining) + " remaining"));
 		return p;
 	}
-	private static String eventLabel(EvidenceStore.Record record)
-	{
+
+	private static String eventLabel(EvidenceStore.Record record) {
 		String type = record.metadata == null ? null : record.metadata.eventType;
-		if (type == null) return "SUBMISSION";
-		switch (type)
-		{
-			case "loot": return "LOOT DROP";
-			case "personal_best": return "PERSONAL BEST";
-			case "collection_log": return "COLLECTION LOG";
-			case "pet": return "PET";
-			case "combat_achievement_tier": return "COMBAT ACHIEVEMENT";
-			default: return type.replace('_', ' ').toUpperCase(Locale.ROOT);
+		if (type == null)
+			return "SUBMISSION";
+		switch (type) {
+			case "loot":
+				return "LOOT DROP";
+			case "personal_best":
+				return "PERSONAL BEST";
+			case "collection_log":
+				return "COLLECTION LOG";
+			case "pet":
+				return "PET";
+			case "combat_achievement_tier":
+				return "COMBAT ACHIEVEMENT";
+			default:
+				return type.replace('_', ' ').toUpperCase(Locale.ROOT);
 		}
 	}
-	private static boolean isPersonalBest(EvidenceStore.Record record)
-	{
+
+	private static boolean isPersonalBest(EvidenceStore.Record record) {
 		return record != null && record.metadata != null && "personal_best".equals(record.metadata.eventType);
 	}
-	private static String friendlyMethod(String method)
-	{
-		if (method == null || method.isBlank() || "unknown".equalsIgnoreCase(method)) return "game activity";
+
+	private static String friendlyMethod(String method) {
+		if (method == null || method.isBlank() || "unknown".equalsIgnoreCase(method))
+			return "game activity";
 		return method.replace('_', ' ');
 	}
-	private static String pbActivity(EvidenceStore.Record record)
-	{
+
+	private static String pbActivity(EvidenceStore.Record record) {
 		if (!isPersonalBest(record)
-			|| record.metadata.details == null) return null;
+				|| record.metadata.details == null)
+			return null;
 		Object pb = record.metadata.details.get("record");
-		if (pb instanceof AnchorModels.PbRecord) return value(((AnchorModels.PbRecord) pb).activity);
-		if (pb instanceof java.util.Map)
-		{
+		if (pb instanceof AnchorModels.PbRecord)
+			return value(((AnchorModels.PbRecord) pb).activity);
+		if (pb instanceof java.util.Map) {
 			Object activity = ((java.util.Map<?, ?>) pb).get("activity");
-			if (activity != null && !String.valueOf(activity).isBlank()) return String.valueOf(activity);
+			if (activity != null && !String.valueOf(activity).isBlank())
+				return String.valueOf(activity);
 		}
 		return null;
 	}
-	private static String title(EvidenceStore.Record record)
-	{
-		if (record.metadata == null) return "Submission";
-		if (record.metadata.items != null && !record.metadata.items.isEmpty()) return value(record.metadata.items.get(0).name);
+
+	static Integer submissionItemId(EvidenceStore.Record record) {
+		if (record == null || record.metadata == null || record.metadata.items == null
+				|| record.metadata.items.isEmpty())
+			return null;
+		int itemId = record.metadata.items.get(0).itemId;
+		return itemId > 0 ? itemId : null;
+	}
+
+	private static String title(EvidenceStore.Record record) {
+		if (record.metadata == null)
+			return "Submission";
+		if (record.metadata.items != null && !record.metadata.items.isEmpty())
+			return value(record.metadata.items.get(0).name);
 		String detailTitle = firstDetail(record, "itemName", "petName", "taskName");
-		if (detailTitle != null) return detailTitle;
+		if (detailTitle != null)
+			return detailTitle;
 		String activity = pbActivity(record);
-		if (activity != null) return titleCase(activity);
+		if (activity != null)
+			return titleCase(activity);
 		String type = record.metadata.eventType == null ? "submission" : record.metadata.eventType.replace('_', ' ');
 		return capitalize(type);
 	}
-	private static String firstDetail(EvidenceStore.Record record, String... keys)
-	{
-		if (record.metadata.details == null) return null;
-		for (String key : keys)
-		{
+
+	private static String firstDetail(EvidenceStore.Record record, String... keys) {
+		if (record.metadata.details == null)
+			return null;
+		for (String key : keys) {
 			Object value = record.metadata.details.get(key);
-			if (value != null && !String.valueOf(value).isBlank()) return String.valueOf(value);
+			if (value != null && !String.valueOf(value).isBlank())
+				return String.valueOf(value);
 		}
 		return null;
 	}
-	private static String rank(Integer value) { return value == null ? "—" : "#" + value; }
-	private static String number(long value) { return NumberFormat.getIntegerInstance(Locale.US).format(value); }
-	private static String value(String value) { return value == null || value.isBlank() ? "—" : value; }
-	private static boolean isFinished(AnchorModels.CompetitionPanel competition)
-	{
-		if (competition == null) return false;
+
+	private static String rank(Integer value) {
+		return value == null ? "—" : "#" + value;
+	}
+
+	private static String number(long value) {
+		return NumberFormat.getIntegerInstance(Locale.US).format(value);
+	}
+
+	private static String value(String value) {
+		return value == null || value.isBlank() ? "—" : value;
+	}
+
+	private static boolean isFinished(AnchorModels.CompetitionPanel competition) {
+		if (competition == null)
+			return false;
 		if ("finished".equalsIgnoreCase(competition.status)
-			|| "ended".equalsIgnoreCase(competition.status)
-			|| "completed".equalsIgnoreCase(competition.status)
-			|| "inactive".equalsIgnoreCase(competition.status))
-		{
+				|| "ended".equalsIgnoreCase(competition.status)
+				|| "completed".equalsIgnoreCase(competition.status)
+				|| "inactive".equalsIgnoreCase(competition.status)) {
 			return true;
 		}
-		if (competition.endsAt != null && !competition.endsAt.isBlank())
-		{
-			try
-			{
+		if (competition.endsAt != null && !competition.endsAt.isBlank()) {
+			try {
 				return Instant.parse(competition.endsAt).isBefore(Instant.now());
+			} catch (RuntimeException ignored) {
 			}
-			catch (RuntimeException ignored) {}
 		}
 		return false;
 	}
-	private static boolean isUpcoming(AnchorModels.CompetitionPanel competition)
-	{
-		if (competition == null) return false;
-		if ("upcoming".equalsIgnoreCase(competition.status)) return true;
-		if (competition.startsAt != null && !competition.startsAt.isBlank())
-		{
-			try { return Instant.parse(competition.startsAt).isAfter(Instant.now()); }
-			catch (RuntimeException ignored) { }
+
+	private static boolean isUpcoming(AnchorModels.CompetitionPanel competition) {
+		if (competition == null)
+			return false;
+		if ("upcoming".equalsIgnoreCase(competition.status))
+			return true;
+		if (competition.startsAt != null && !competition.startsAt.isBlank()) {
+			try {
+				return Instant.parse(competition.startsAt).isAfter(Instant.now());
+			} catch (RuntimeException ignored) {
+			}
 		}
 		return false;
 	}
-	private static String startsCountdown(String start) { try { Duration d = Duration.between(Instant.now(), Instant.parse(start)); if (d.isNegative()) return "Starting now"; long days = d.toDays(); long hours = d.minusDays(days).toHours(); long minutes = d.minusDays(days).minusHours(hours).toMinutes(); return "Starts in " + (days > 0 ? days + "d " : "") + (hours > 0 ? hours + "h " : "") + minutes + "m"; } catch (RuntimeException e) { return "Starts soon"; } }
-	private static String countdown(String end) { try { Duration d = Duration.between(Instant.now(), Instant.parse(end)); if (d.isNegative()) return "Ended"; return "Ends in " + d.toDays() + "d " + d.minusDays(d.toDays()).toHours() + "h"; } catch (RuntimeException e) { return ""; } }
-	private static String capitalize(String value) { return value.isEmpty() ? value : Character.toUpperCase(value.charAt(0)) + value.substring(1); }
-	private static String titleCase(String value)
-	{
-		if (value == null || value.isBlank()) return value;
+
+	private static String startsCountdown(String start) {
+		try {
+			Duration d = Duration.between(Instant.now(), Instant.parse(start));
+			if (d.isNegative())
+				return "Starting now";
+			long days = d.toDays();
+			long hours = d.minusDays(days).toHours();
+			long minutes = d.minusDays(days).minusHours(hours).toMinutes();
+			return "Starts in " + (days > 0 ? days + "d " : "") + (hours > 0 ? hours + "h " : "") + minutes + "m";
+		} catch (RuntimeException e) {
+			return "Starts soon";
+		}
+	}
+
+	private static String countdown(String end) {
+		try {
+			Duration d = Duration.between(Instant.now(), Instant.parse(end));
+			if (d.isNegative())
+				return "Ended";
+			return "Ends in " + d.toDays() + "d " + d.minusDays(d.toDays()).toHours() + "h";
+		} catch (RuntimeException e) {
+			return "";
+		}
+	}
+
+	private static String capitalize(String value) {
+		return value.isEmpty() ? value : Character.toUpperCase(value.charAt(0)) + value.substring(1);
+	}
+
+	private static String titleCase(String value) {
+		if (value == null || value.isBlank())
+			return value;
 		String[] words = value.toLowerCase(Locale.ROOT).split("\\s+");
 		StringBuilder result = new StringBuilder(value.length());
-		for (String word : words)
-		{
-			if (result.length() > 0) result.append(' ');
+		for (String word : words) {
+			if (result.length() > 0)
+				result.append(' ');
 			result.append(capitalize(word));
 		}
 		return result.toString();
 	}
-	private static String html(String value) { return "<html><div style='width:" + (PANEL_WIDTH - 60) + "px'>" + value + "</div></html>"; }
-	private static String esc(String value) { return value == null ? "" : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"); }
 
-	private static BufferedImage scale(BufferedImage image, int maxWidth, int maxHeight)
-	{
-		double factor = Math.min((double) maxWidth / image.getWidth(), (double) maxHeight / image.getHeight()); factor = Math.min(1.0, factor);
-		int width = Math.max(1, (int) (image.getWidth() * factor)); int height = Math.max(1, (int) (image.getHeight() * factor)); BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-		Graphics2D g = scaled.createGraphics(); g.drawImage(image, 0, 0, width, height, null); g.dispose(); return scaled;
+	private static String html(String value) {
+		return "<html><div style='width:" + (PANEL_WIDTH - 60) + "px'>" + value + "</div></html>";
 	}
-	private static BufferedImage scaleToWidth(BufferedImage image, int width)
-	{
-		double factor = (double) width / image.getWidth(); int height = Math.max(1, (int) Math.round(image.getHeight() * factor));
-		BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB); Graphics2D g = scaled.createGraphics();
-		g.drawImage(image, 0, 0, width, height, null); g.dispose(); return scaled;
+
+	private static String esc(String value) {
+		return value == null ? "" : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
-	private static BufferedImage placeholderBanner() { BufferedImage i = new BufferedImage(PANEL_WIDTH, 62, BufferedImage.TYPE_INT_ARGB); Graphics2D g = i.createGraphics(); g.setColor(new Color(22, 31, 43)); g.fillRect(0, 0, i.getWidth(), i.getHeight()); g.setColor(GOLD); g.setFont(new Font("SansSerif", Font.BOLD, 24)); g.drawString("THE ANCHOR", 38, 39); g.dispose(); return i; }
-	private static ImageIcon loadBannerIcon(boolean animated)
-	{
+
+	private static BufferedImage scale(BufferedImage image, int maxWidth, int maxHeight) {
+		double factor = Math.min((double) maxWidth / image.getWidth(), (double) maxHeight / image.getHeight());
+		factor = Math.min(1.0, factor);
+		int width = Math.max(1, (int) (image.getWidth() * factor));
+		int height = Math.max(1, (int) (image.getHeight() * factor));
+		BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = scaled.createGraphics();
+		g.drawImage(image, 0, 0, width, height, null);
+		g.dispose();
+		return scaled;
+	}
+
+	private static BufferedImage scaleToWidth(BufferedImage image, int width) {
+		double factor = (double) width / image.getWidth();
+		int height = Math.max(1, (int) Math.round(image.getHeight() * factor));
+		BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = scaled.createGraphics();
+		g.drawImage(image, 0, 0, width, height, null);
+		g.dispose();
+		return scaled;
+	}
+
+	private static BufferedImage placeholderBanner() {
+		BufferedImage i = new BufferedImage(PANEL_WIDTH, 62, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = i.createGraphics();
+		g.setColor(new Color(22, 31, 43));
+		g.fillRect(0, 0, i.getWidth(), i.getHeight());
+		g.setColor(GOLD);
+		g.setFont(new Font("SansSerif", Font.BOLD, 24));
+		g.drawString("THE ANCHOR", 38, 39);
+		g.dispose();
+		return i;
+	}
+
+	private static ImageIcon loadBannerIcon(boolean animated) {
 		java.net.URL resource = AnchorPanel.class.getResource(animated ? "/anchor_banner.gif" : "/anchor_banner.png");
 		return resource == null ? new ImageIcon(scale(placeholderBanner(), PANEL_WIDTH, 62)) : new ImageIcon(resource);
 	}
 
-	private static final class AspectRatioIconLabel extends JLabel
-	{
+	private static final class AspectRatioIconLabel extends JLabel {
 		private int aspectHeight = -1;
 
-		private AspectRatioIconLabel()
-		{
-			addComponentListener(new ComponentAdapter()
-			{
+		private AspectRatioIconLabel() {
+			addComponentListener(new ComponentAdapter() {
 				@Override
-				public void componentResized(ComponentEvent event)
-				{
+				public void componentResized(ComponentEvent event) {
 					refreshAspectRatio();
 				}
 			});
 		}
 
-		private void refreshAspectRatio()
-		{
+		private void refreshAspectRatio() {
 			Icon icon = getIcon();
 			int width = getWidth();
-			if (width <= 0 || icon == null || icon.getIconWidth() <= 0 || icon.getIconHeight() <= 0) return;
+			if (width <= 0 || icon == null || icon.getIconWidth() <= 0 || icon.getIconHeight() <= 0)
+				return;
 			int height = Math.max(1, (int) Math.round((double) width * icon.getIconHeight() / icon.getIconWidth()));
-			if (height == aspectHeight) return;
+			if (height == aspectHeight)
+				return;
 			aspectHeight = height;
 			setMinimumSize(new Dimension(0, height));
 			setPreferredSize(new Dimension(icon.getIconWidth(), height));
 			setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
-			if (getParent() != null) getParent().revalidate();
+			if (getParent() != null)
+				getParent().revalidate();
 		}
 
 		@Override
-		public Dimension getMaximumSize()
-		{
+		public Dimension getMaximumSize() {
 			return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
 		}
 
 		@Override
-		protected void paintComponent(Graphics graphics)
-		{
+		protected void paintComponent(Graphics graphics) {
 			Icon icon = getIcon();
-			if (icon == null || icon.getIconWidth() <= 0 || icon.getIconHeight() <= 0) return;
+			if (icon == null || icon.getIconWidth() <= 0 || icon.getIconHeight() <= 0)
+				return;
 			Graphics2D g = (Graphics2D) graphics.create();
 			g.scale((double) getWidth() / icon.getIconWidth(), (double) getHeight() / icon.getIconHeight());
 			icon.paintIcon(this, g, 0, 0);
 			g.dispose();
 		}
 	}
-	private static final class EvidenceImagePanel extends JPanel
-	{
+
+	private static final class EvidenceImagePanel extends JPanel {
 		private final BufferedImage image;
 
-		private EvidenceImagePanel(BufferedImage image)
-		{
+		private EvidenceImagePanel(BufferedImage image) {
 			this.image = image;
 			setBackground(Color.BLACK);
 			setPreferredSize(new Dimension(Math.min(900, image.getWidth()), Math.min(700, image.getHeight())));
 		}
 
 		@Override
-		protected void paintComponent(Graphics graphics)
-		{
+		protected void paintComponent(Graphics graphics) {
 			super.paintComponent(graphics);
 			Insets insets = getInsets();
 			int availableWidth = Math.max(1, getWidth() - insets.left - insets.right);
 			int availableHeight = Math.max(1, getHeight() - insets.top - insets.bottom);
-			double factor = Math.min((double) availableWidth / image.getWidth(), (double) availableHeight / image.getHeight());
+			double factor = Math.min((double) availableWidth / image.getWidth(),
+					(double) availableHeight / image.getHeight());
 			int width = Math.max(1, (int) Math.round(image.getWidth() * factor));
 			int height = Math.max(1, (int) Math.round(image.getHeight() * factor));
 			int x = insets.left + (availableWidth - width) / 2;
@@ -1117,6 +1352,28 @@ public class AnchorPanel extends PluginPanel
 			g.dispose();
 		}
 	}
-	private static BufferedImage placeholderAvatar() { BufferedImage i = new BufferedImage(58, 58, BufferedImage.TYPE_INT_ARGB); Graphics2D g = i.createGraphics(); g.setColor(new Color(40, 52, 68)); g.fillRect(0, 0, 58, 58); g.setColor(GOLD); g.setFont(new Font("SansSerif", Font.BOLD, 28)); g.drawString("A", 20, 39); g.dispose(); return i; }
-	private static BufferedImage placeholderCompetition(String kind) { BufferedImage i = new BufferedImage(PANEL_WIDTH - 32, 76, BufferedImage.TYPE_INT_ARGB); Graphics2D g = i.createGraphics(); g.setColor(new Color(40, 52, 68)); g.fillRect(0, 0, i.getWidth(), i.getHeight()); g.setColor(GOLD); g.setFont(new Font("SansSerif", Font.BOLD, 20)); g.drawString(kind, 12, 45); g.dispose(); return i; }
+
+	private static BufferedImage placeholderAvatar() {
+		BufferedImage i = new BufferedImage(58, 58, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = i.createGraphics();
+		g.setColor(new Color(40, 52, 68));
+		g.fillRect(0, 0, 58, 58);
+		g.setColor(GOLD);
+		g.setFont(new Font("SansSerif", Font.BOLD, 28));
+		g.drawString("A", 20, 39);
+		g.dispose();
+		return i;
+	}
+
+	private static BufferedImage placeholderCompetition(String kind) {
+		BufferedImage i = new BufferedImage(PANEL_WIDTH - 32, 76, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = i.createGraphics();
+		g.setColor(new Color(40, 52, 68));
+		g.fillRect(0, 0, i.getWidth(), i.getHeight());
+		g.setColor(GOLD);
+		g.setFont(new Font("SansSerif", Font.BOLD, 20));
+		g.drawString(kind, 12, 45);
+		g.dispose();
+		return i;
+	}
 }

@@ -90,6 +90,7 @@ public class EventPipeline
 			if (result.isSuccessful() && result.value != null)
 			{
 				record.submissionId = result.value.submissionId; record.status = parseStatus(result.value.status);
+				record.error = validationSummary(result.value.validationMessages);
 				record.retryCount = 0;
 			}
 			else
@@ -185,6 +186,14 @@ public class EventPipeline
 	private void notifyListeners() { for (Runnable listener : listeners) listener.run(); }
 	private static String eventId(EvidenceStore.Record record) { return record == null || record.metadata == null ? "unknown" : record.metadata.eventId; }
 	private static String eventType(EvidenceStore.Record record) { return record == null || record.metadata == null ? "unknown" : record.metadata.eventType; }
+	private static String validationSummary(List<AnchorModels.ValidationMessage> messages)
+	{
+		if (messages == null || messages.isEmpty()) return null;
+		return messages.stream().filter(java.util.Objects::nonNull)
+			.map(message -> (message.field == null || message.field.isBlank() ? "" : message.field + ": ")
+				+ (message.message == null ? "Validation failed" : message.message))
+			.collect(java.util.stream.Collectors.joining(" "));
+	}
 	private static AnchorModels.EventStatus parseStatus(String status)
 	{
 		if (status == null) return AnchorModels.EventStatus.DRAFT;

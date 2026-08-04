@@ -3,6 +3,9 @@ package com.theanchor.api;
 import com.google.gson.Gson;
 import com.theanchor.AnchorConfig;
 import com.theanchor.model.AnchorModels;
+import java.awt.image.BufferedImage;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -10,12 +13,39 @@ import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import javax.imageio.ImageIO;
 import org.junit.Test;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
 public class AnchorApiClientTest
 {
+	@Test public void parsesStructuredValidationMessagesFromConflictResponse() throws Exception
+	{
+		try (MockWebServer server = new MockWebServer())
+		{
+			server.enqueue(new MockResponse().setResponseCode(409).setHeader("Content-Type", "application/json")
+				.setBody("{\"eventId\":\"event-1\",\"submissionId\":\"submission-1\",\"status\":\"draft\",\"validationMessages\":[{\"code\":\"required\",\"field\":\"source.name\",\"message\":\"source.name is required\",\"severity\":\"error\"}]}"));
+			server.start();
+			AnchorConfig config = mock(AnchorConfig.class); when(config.apiBaseUrl()).thenReturn(server.url("/").toString());
+			when(config.authenticationCode()).thenReturn("CODE");
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config);
+			Path screenshot = Files.createTempFile("anchor-api-validation", ".png");
+			ImageIO.write(new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB), "png", screenshot.toFile());
+			CountDownLatch latch = new CountDownLatch(1);
+			@SuppressWarnings("unchecked")
+			final AnchorApiClient.ApiResult<AnchorModels.EventResponse>[] response = new AnchorApiClient.ApiResult[1];
+
+			api.uploadEvent(new AnchorModels.EventEnvelope(), screenshot, "png", result -> { response[0] = result; latch.countDown(); });
+
+			assertTrue(latch.await(3, TimeUnit.SECONDS));
+			assertTrue(response[0].isSuccessful());
+			assertEquals("submission-1", response[0].value.submissionId);
+			assertEquals("source.name", response[0].value.validationMessages.get(0).field);
+			assertEquals("source.name is required", response[0].value.validationMessages.get(0).message);
+		}
+	}
+
 	@Test public void sendsPermanentCodeOnlyAsBearerHeader() throws Exception
 	{
 		try (MockWebServer server = new MockWebServer())
