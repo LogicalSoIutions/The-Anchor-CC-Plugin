@@ -6,6 +6,8 @@ package com.theanchor.events;
 
 import com.theanchor.evidence.EventPipeline;
 import com.theanchor.model.AnchorModels;
+import com.theanchor.service.LootEligibility;
+import com.theanchor.service.RulesService;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -33,14 +35,14 @@ public class CollectionLogEventListener
 	@Inject private EventPipeline pipeline;
 	@Inject private Client client;
 	@Inject private ItemManager itemManager;
+	@Inject private RulesService rules;
 	private final AtomicBoolean popupStarted = new AtomicBoolean();
 
 	@Subscribe public void onChatMessage(ChatMessage event)
 	{
 		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) return;
 		Matcher matcher = PATTERN.matcher(Text.removeTags(event.getMessage())); if (!matcher.find()) return;
-		String item = normalizeItemName(matcher.group(1)); HashMap<String, Object> details = new HashMap<>(); details.put("itemName", item); details.put("detectionSource", "chat");
-		pipeline.capture("collection_log", item.toLowerCase(), collectionLogSource(), collectionLogItems(item), details, false);
+		capture(normalizeItemName(matcher.group(1)), "chat");
 	}
 
 	@Subscribe public void onScriptPostFired(ScriptPostFired event)
@@ -52,8 +54,27 @@ public class CollectionLogEventListener
 		if (!"Collection log".equalsIgnoreCase(title) || body == null) return;
 		String item = normalizeItemName(body).replaceFirst("(?i)^New item:\\s*", "").trim();
 		if (item.isEmpty()) return;
-		HashMap<String, Object> details = new HashMap<>(); details.put("itemName", item); details.put("detectionSource", "popup");
-		pipeline.capture("collection_log", item.toLowerCase(), collectionLogSource(), collectionLogItems(item), details, false);
+		capture(item, "popup");
+	}
+
+	private void capture(String itemName, String detectionSource)
+	{
+		if (itemName.isEmpty()) return;
+		List<AnchorModels.Item> items = collectionLogItems(itemName);
+		String eventType = eventTypeFor(items, rules.current());
+		HashMap<String, Object> details = new HashMap<>();
+		details.put("itemName", itemName);
+		details.put("detectionSource", detectionSource);
+		pipeline.capture(eventType, itemName.toLowerCase(java.util.Locale.ROOT), collectionLogSource(), items, details,
+			"loot".equals(eventType));
+	}
+
+	static String eventTypeFor(List<AnchorModels.Item> items, AnchorModels.Rules rules)
+	{
+		if (items != null)
+			for (AnchorModels.Item item : items)
+				if (LootEligibility.meetsMinimumValue(item, rules)) return "loot";
+		return "collection_log";
 	}
 
 	static String normalizeItemName(String value)
@@ -73,24 +94,44 @@ public class CollectionLogEventListener
 	{
 		try
 		{
-			List<ItemPrice> matches = itemManager.search(itemName);
-			if (matches == null || matches.isEmpty()) return Collections.emptyList();
-			int itemId = matches.get(0).getId();
-			for (ItemPrice match : matches)
+			int itemId = 0;
+			List<ItemPrice> matches = itemManager != null ? itemManager.search(itemName) : null;
+			if (matches != null && !matches.isEmpty())
 			{
-				ItemComposition composition = itemManager.getItemComposition(match.getId());
-				if (composition != null && itemName.equalsIgnoreCase(composition.getName())) { itemId = match.getId(); break; }
+				itemId = matches.get(0).getId();
+				for (ItemPrice match : matches)
+				{
+					ItemComposition composition = itemManager.getItemComposition(match.getId());
+					if (composition != null && itemName.equalsIgnoreCase(composition.getName())) { itemId = match.getId(); break; }
+				}
 			}
-			ItemComposition composition = itemManager.getItemComposition(itemId);
+
 			AnchorModels.Item item = new AnchorModels.Item();
-			item.itemId = itemId; item.name = itemName; item.quantity = 1;
-			item.unitGeValue = itemManager.getItemPrice(itemId); item.totalGeValue = item.unitGeValue;
-			if (composition != null) { item.tradeable = composition.isTradeable(); item.stackable = composition.isStackable(); }
+			item.itemId = itemId;
+			item.name = itemName;
+			item.quantity = 1;
+
+			if (itemId > 0 && itemManager != null)
+			{
+				long price = itemManager.getItemPrice(itemId);
+				if (price <= 0)
+				{
+					try { price = itemManager.getItemPriceWithSource(itemId, true); } catch (Throwable ignored) {}
+				}
+				item.unitGeValue = price;
+				item.totalGeValue = price;
+				ItemComposition composition = itemManager.getItemComposition(itemId);
+				if (composition != null) { item.tradeable = composition.isTradeable(); item.stackable = composition.isStackable(); }
+			}
+
 			return Collections.singletonList(item);
 		}
 		catch (RuntimeException ignored)
 		{
-			return Collections.emptyList();
+			AnchorModels.Item fallback = new AnchorModels.Item();
+			fallback.name = itemName;
+			fallback.quantity = 1;
+			return Collections.singletonList(fallback);
 		}
 	}
 }

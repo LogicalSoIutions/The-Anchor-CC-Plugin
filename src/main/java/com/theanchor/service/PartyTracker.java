@@ -105,9 +105,13 @@ public class PartyTracker
 			for (MemberSnapshot member : members)
 			{
 				if (member == null || member.name == null || member.name.isBlank()) continue;
-				AnchorModels.PartyMember value = new AnchorModels.PartyMember();
-				value.name = member.name; value.clanMember = member.clanMember; party.members.add(value);
-				if (Boolean.TRUE.equals(member.clanMember)) party.detectedClanMemberCount++;
+				if (Boolean.TRUE.equals(member.clanMember))
+				{
+					party.detectedClanMemberCount++;
+					AnchorModels.PartyMember value = new AnchorModels.PartyMember();
+					value.name = member.name; value.clanMember = true; party.members.add(value);
+					if (party.detectedPartySize > 1) party.clanMemberNames.add(member.name);
+				}
 				else if (Boolean.FALSE.equals(member.clanMember)) party.detectedNonClanMemberCount++;
 			}
 		}

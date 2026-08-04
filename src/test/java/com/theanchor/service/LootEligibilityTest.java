@@ -10,9 +10,11 @@ public class LootEligibilityTest
 {
 	@Test public void capturesQualifyingTradeableLoot()
 	{
-		AnchorModels.Item item = item("Expensive drop", 2_500_000L);
+		AnchorModels.Item item = item("Expensive drop", 1_500_000L);
 		assertTrue(LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
 		item.stackable = true;
+		assertTrue(LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
+		item.unitGeValue = 1_499_999L;
 		assertFalse(LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
 	}
 

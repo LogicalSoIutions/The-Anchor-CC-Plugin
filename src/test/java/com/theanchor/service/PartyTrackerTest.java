@@ -13,7 +13,7 @@ import static org.junit.Assert.*;
 
 public class PartyTrackerTest
 {
-	@Test public void serializesNamesAndClanSplit()
+	@Test public void serializesOnlyClanNamesAndClanSplit()
 	{
 		AnchorModels.Party party = PartyTracker.snapshotFromData(3, Arrays.asList(
 			new PartyTracker.MemberSnapshot("Anchor One", true),
@@ -23,8 +23,11 @@ public class PartyTrackerTest
 		assertEquals(3, party.detectedPartySize);
 		assertEquals(1, party.detectedClanMemberCount);
 		assertEquals(1, party.detectedNonClanMemberCount);
-		assertEquals(3, party.members.size());
+		assertEquals(1, party.members.size());
+		assertEquals(List.of("Anchor One"), party.clanMemberNames);
 		assertTrue(json.contains("Anchor One"));
+		assertFalse(json.contains("Guest Two"));
+		assertFalse(json.contains("Unknown Three"));
 	}
 
 	@Test public void partyCountCanExceedNames()
@@ -50,5 +53,6 @@ public class PartyTrackerTest
 		assertEquals(1, party.detectedClanMemberCount);
 		assertEquals(1, party.submittedClanMemberCount);
 		assertEquals(0, party.detectedNonClanMemberCount);
+		assertTrue(party.clanMemberNames.isEmpty());
 	}
 }

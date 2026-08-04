@@ -7,11 +7,12 @@ package com.theanchor.events;
 import com.theanchor.evidence.EventPipeline;
 import com.theanchor.model.AnchorModels;
 import com.theanchor.service.LootEligibility;
-import com.theanchor.service.BossRegistry;
 import com.theanchor.service.RulesService;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.ItemComposition;
@@ -38,13 +39,12 @@ public class LootEventListener
 
 	@Subscribe public void onLootReceived(LootReceived event)
 	{
-		if (event.getType() != LootRecordType.NPC && event.getType() != LootRecordType.EVENT) return;
+		if (event.getType() == LootRecordType.PLAYER) return;
 		dispatch(event.getItems(), event.getName(), null, event.getType().name().toLowerCase());
 	}
 
 	private void dispatch(Collection<ItemStack> stacks, String sourceName, Integer sourceId, String sourceType)
 	{
-		if (!BossRegistry.isSupported(sourceName)) return;
 		List<AnchorModels.Item> eligible = new ArrayList<>();
 		for (ItemStack stack : stacks)
 		{
@@ -57,7 +57,13 @@ public class LootEventListener
 		}
 		if (eligible.isEmpty()) return;
 		AnchorModels.Source source = new AnchorModels.Source(); source.type = sourceType; source.id = sourceId; source.name = sourceName;
-		String key = (sourceName == null ? "" : sourceName) + '|' + eligible.get(0).itemId;
-		pipeline.capture("loot", key, source, eligible, null, true);
+		// Use the item as the key so a collection-log notification for the same drop does not
+		// create a second loot submission moments after RuneLite's loot event.
+		String key = eligible.get(0).name == null
+			? String.valueOf(eligible.get(0).itemId)
+			: eligible.get(0).name.trim().toLowerCase(java.util.Locale.ROOT);
+		Map<String, Object> details = new LinkedHashMap<>();
+		if (eligible.get(0).name != null) details.put("itemName", eligible.get(0).name);
+		pipeline.capture("loot", key, source, eligible, details, true);
 	}
 }

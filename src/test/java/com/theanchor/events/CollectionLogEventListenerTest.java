@@ -1,5 +1,7 @@
 package com.theanchor.events;
 
+import com.theanchor.model.AnchorModels;
+import java.util.Collections;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -20,5 +22,15 @@ public class CollectionLogEventListenerTest
 	{
 		assertEquals("collection_log", CollectionLogEventListener.collectionLogSource().type);
 		assertEquals("Collection Log", CollectionLogEventListener.collectionLogSource().name);
+	}
+
+	@Test public void promotesValuableCollectionLogUnlockToLoot()
+	{
+		AnchorModels.Item item = new AnchorModels.Item();
+		item.unitGeValue = 1_500_000L;
+		assertEquals("loot", CollectionLogEventListener.eventTypeFor(Collections.singletonList(item), new AnchorModels.Rules()));
+
+		item.unitGeValue = 1_499_999L;
+		assertEquals("collection_log", CollectionLogEventListener.eventTypeFor(Collections.singletonList(item), new AnchorModels.Rules()));
 	}
 }

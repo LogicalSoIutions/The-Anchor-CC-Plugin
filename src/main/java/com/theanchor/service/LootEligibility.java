@@ -27,6 +27,12 @@ public final class LootEligibility
 		if (item == null || rules == null) return false;
 		String name = item.name == null ? "" : item.name.trim().toLowerCase(Locale.ROOT);
 		if (ALWAYS_CAPTURE.contains(name)) return true;
-		return item.tradeable && !item.stackable && item.quantity == 1 && item.unitGeValue >= rules.minimumLootValue;
+		return item.tradeable && item.quantity >= 1 && meetsMinimumValue(item, rules);
+	}
+
+	/** Value-only check used when a collection-log unlock must be promoted to clan-point loot. */
+	public static boolean meetsMinimumValue(AnchorModels.Item item, AnchorModels.Rules rules)
+	{
+		return item != null && rules != null && item.unitGeValue >= rules.minimumLootValue;
 	}
 }

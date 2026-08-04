@@ -139,8 +139,9 @@ public final class AnchorModels
 
 	public static final class Rules
 	{
+		public static final long BASE_MINIMUM_LOOT_VALUE = 1_500_000L;
 		public String version = "fallback-1";
-		public long minimumLootValue = 2_500_000L;
+		public long minimumLootValue = BASE_MINIMUM_LOOT_VALUE;
 	}
 
 	public enum EventStatus { PENDING, UPLOADING, DRAFT, SUBMITTED, APPROVED, REJECTED, FAILED }
@@ -181,6 +182,8 @@ public final class AnchorModels
 		public int submittedClanMemberCount;
 		public int detectedNonClanMemberCount;
 		public int submittedNonClanMemberCount;
+		/** Same-clan RSNs involved in a multi-player encounter; guest RSNs are never included. */
+		public List<String> clanMemberNames = new ArrayList<>();
 		public List<PartyMember> members = new ArrayList<>();
 		public String method = "unknown";
 		public String confidence = "low";

@@ -21,7 +21,11 @@ public class RulesService
 			if (result.isSuccessful() && result.value != null)
 			{
 				AnchorModels.Rules loaded = result.value;
-				if (loaded.minimumLootValue <= 0) loaded.minimumLootValue = 2_500_000L;
+				// The API may still be serving an older, higher threshold during rollout.
+				// Never let that suppress loot worth at least the clan's 1.5m baseline.
+				if (loaded.minimumLootValue <= 0
+					|| loaded.minimumLootValue > AnchorModels.Rules.BASE_MINIMUM_LOOT_VALUE)
+					loaded.minimumLootValue = AnchorModels.Rules.BASE_MINIMUM_LOOT_VALUE;
 				current = loaded;
 			}
 			if (callback != null) callback.run();

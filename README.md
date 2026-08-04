@@ -8,7 +8,7 @@ RuneLite Plugin Hub project for The Anchor clan.
 - Event alerts delivered to game chat with an optional in-game overlay.
 - Automatic full-client evidence capture for eligible loot, collection-log unlocks, pets, Combat Achievement tiers, and PBs.
 - Durable local outbox and editable loot-submission drafts.
-- Raid scoreboard or observed boss-interaction party-size estimates without storing other player names.
+- Raid scoreboard or observed boss-interaction party estimates, including same-clan participant RSNs while excluding guest names.
 - Live and bulk personal-best sync, including Adventure Log team-size records.
 - Automatic first-connection sync for every Combat Achievement task and all skill levels/XP.
 - One-time collection-log prompt followed by an automatic exact item/quantity upload when the log is opened.
