@@ -128,7 +128,8 @@ public class AnchorApiClientTest
 		try (MockWebServer server = new MockWebServer())
 		{
 			server.enqueue(new MockResponse().setResponseCode(200)
-				.setBody("{\"active\":true,\"eventTitle\":\"The Anchor Bingo\",\"itemIds\":[20997],\"bossIds\":[5886]}"));
+				.setBody("{\"active\":true,\"eventTitle\":\"The Anchor Bingo\",\"itemIds\":[20997],\"bossIds\":[5886],"
+					+ "\"teamsByDiscordId\":{\"284148696017403905\":{\"teamId\":\"team-1\",\"teamName\":\"Team 1\"}}}"));
 			server.start();
 			AnchorConfig config = mock(AnchorConfig.class);
 			when(config.apiBaseUrl()).thenReturn(server.url("/").toString());
@@ -141,8 +142,41 @@ public class AnchorApiClientTest
 			assertTrue(event[0].active);
 			assertEquals("The Anchor Bingo", event[0].eventTitle);
 			assertEquals(Integer.valueOf(20997), event[0].itemIds.get(0));
+			assertEquals("team-1", event[0].teamsByDiscordId.get("284148696017403905").teamId);
+			assertEquals("Team 1", event[0].teamsByDiscordId.get("284148696017403905").teamName);
 			RecordedRequest request = server.takeRequest();
 			assertEquals("/api/runelite/bingo", request.getPath());
+			assertEquals("Bearer CODE", request.getHeader("Authorization"));
+		}
+	}
+
+	@Test public void readsAuthenticatedBingoRules() throws Exception
+	{
+		try (MockWebServer server = new MockWebServer())
+		{
+			server.enqueue(new MockResponse().setResponseCode(200).setBody("{\"schemaVersion\":1,"
+				+ "\"rulesVersion\":\"2026-08-04.3\",\"itemIds\":[20997],\"bossIds\":[5886],"
+				+ "\"triggers\":{\"matchingItem\":true,\"bossCollectionLog\":true,\"bossPet\":true,\"ordinaryBossLoot\":false},"
+				+ "\"evidence\":{\"eventType\":\"bingo\",\"screenshotRequired\":true,\"finalizeSubmission\":true}}"));
+			server.start();
+			AnchorConfig config = mock(AnchorConfig.class);
+			when(config.apiBaseUrl()).thenReturn(server.url("/").toString());
+			when(config.authenticationCode()).thenReturn("CODE");
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config);
+			CountDownLatch latch = new CountDownLatch(1);
+			final AnchorModels.BingoRules[] rules = new AnchorModels.BingoRules[1];
+			api.getBingoRules(result -> { rules[0] = result.value; latch.countDown(); });
+			assertTrue(latch.await(3, TimeUnit.SECONDS));
+			assertEquals("2026-08-04.3", rules[0].rulesVersion);
+			assertTrue(rules[0].triggers.matchingItem);
+			assertTrue(rules[0].triggers.bossCollectionLog);
+			assertTrue(rules[0].triggers.bossPet);
+			assertFalse(rules[0].triggers.ordinaryBossLoot);
+			assertEquals("bingo", rules[0].evidence.eventType);
+			assertTrue(rules[0].evidence.screenshotRequired);
+			assertTrue(rules[0].evidence.finalizeSubmission);
+			RecordedRequest request = server.takeRequest();
+			assertEquals("/api/runelite/bingo/rules", request.getPath());
 			assertEquals("Bearer CODE", request.getHeader("Authorization"));
 		}
 	}

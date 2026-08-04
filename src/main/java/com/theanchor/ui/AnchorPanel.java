@@ -582,21 +582,24 @@ public class AnchorPanel extends PluginPanel {
 				if (!memberNames.isEmpty())
 					card.add(wrappedMuted(memberNames));
 			}
-			if (displayStatus == AnchorModels.EventStatus.DRAFT) {
+			if (displayStatus == AnchorModels.EventStatus.DRAFT && canFinalize(group)) {
 				card.add(Box.createVerticalStrut(4));
 				card.add(label("Notes", false));
 				card.add(notes);
 			}
 			List<JButton> actionButtons = new java.util.ArrayList<>();
-			JButton proof = actionButton("View proof", false);
-			proof.addActionListener(e -> showProof(record));
-			actionButtons.add(proof);
+			EvidenceStore.Record proofRecord = proofRecord(group, record);
+			if (proofRecord != null) {
+				JButton proof = actionButton("View proof", false);
+				proof.addActionListener(e -> showProof(proofRecord));
+				actionButtons.add(proof);
+			}
 			if (displayStatus == AnchorModels.EventStatus.FAILED || displayStatus == AnchorModels.EventStatus.PENDING) {
 				JButton retry = actionButton("Retry", true);
 				retry.addActionListener(e -> pipeline.retryGroup(record));
 				actionButtons.add(retry);
 			}
-			if (displayStatus == AnchorModels.EventStatus.DRAFT) {
+			if (displayStatus == AnchorModels.EventStatus.DRAFT && canFinalize(group)) {
 				JButton submit = actionButton("Submit", true);
 				submit.addActionListener(e -> {
 					int partySize = (Integer) party.getValue();
@@ -664,6 +667,24 @@ public class AnchorPanel extends PluginPanel {
 			for (EvidenceStore.Record record : group) if (record.status == candidate) return candidate;
 		}
 		return group.get(0).status;
+	}
+
+	private static boolean canFinalize(List<EvidenceStore.Record> group) {
+		if (group == null) return true;
+		for (EvidenceStore.Record record : group) {
+			if (record == null || record.metadata == null || record.metadata.context == null) continue;
+			Object value = record.metadata.context.get("finalizeSubmission");
+			if (Boolean.FALSE.equals(value) || "false".equalsIgnoreCase(String.valueOf(value))) return false;
+		}
+		return true;
+	}
+
+	private static EvidenceStore.Record proofRecord(List<EvidenceStore.Record> group, EvidenceStore.Record fallback) {
+		if (fallback != null && fallback.screenshotPath != null && !fallback.screenshotPath.isBlank()) return fallback;
+		if (group != null)
+			for (EvidenceStore.Record record : group)
+				if (record != null && record.screenshotPath != null && !record.screenshotPath.isBlank()) return record;
+		return null;
 	}
 
 	private static String partyMemberNames(AnchorModels.Party party) {

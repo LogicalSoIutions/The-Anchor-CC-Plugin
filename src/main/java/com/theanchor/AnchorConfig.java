@@ -23,8 +23,8 @@ public interface AnchorConfig extends Config
 	@ConfigSection(name = "Event Alerts", description = "Clan event announcements", position = 3)
 	String EVENT_ALERTS = "eventAlerts";
 
-	@ConfigSection(name = "Event Overlay", description = "Active bingo event overlay", position = 4)
-	String EVENT_OVERLAY = "eventOverlay";
+	@ConfigSection(name = "Bingo Overlay", description = "Active bingo event overlay", position = 4)
+	String BINGO_OVERLAY = "bingoOverlay";
 
 	@ConfigItem(keyName = "authenticationCode", name = "Authentication code",
 		description = "Run /connect in The Anchor Discord and paste the permanent code here",
@@ -85,8 +85,13 @@ public interface AnchorConfig extends Config
 		section = EVENT_ALERTS, position = 5)
 	default Color eventAlertColor() { return new Color(0, 130, 235); }
 
-	@ConfigItem(keyName = "eventOverlayTextColor", name = "Text Color",
+	@ConfigItem(keyName = "bingoOverlayEnabled", name = "Bingo Overlay",
+		description = "Show the active bingo event overlay",
+		section = BINGO_OVERLAY, position = 0)
+	default boolean bingoOverlayEnabled() { return true; }
+
+	@ConfigItem(keyName = "bingoOverlayTextColor", name = "Text Color",
 		description = "Choose the text color used by the active event overlay",
-		section = EVENT_OVERLAY, position = 0)
-	default Color eventOverlayTextColor() { return Color.WHITE; }
+		section = BINGO_OVERLAY, position = 1)
+	default Color bingoOverlayTextColor() { return Color.WHITE; }
 }

@@ -8,6 +8,7 @@ import com.theanchor.evidence.EventPipeline;
 import com.theanchor.model.AnchorModels;
 import com.theanchor.service.LootEligibility;
 import com.theanchor.service.RulesService;
+import com.theanchor.service.BingoService;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -36,6 +37,7 @@ public class CollectionLogEventListener
 	@Inject private Client client;
 	@Inject private ItemManager itemManager;
 	@Inject private RulesService rules;
+	@Inject private BingoService bingo;
 	private final AtomicBoolean popupStarted = new AtomicBoolean();
 
 	@Subscribe public void onChatMessage(ChatMessage event)
@@ -67,6 +69,13 @@ public class CollectionLogEventListener
 		String dedupeKey = itemName.toLowerCase(java.util.Locale.ROOT);
 		for (String eventType : eventTypesFor(items, rules.current()))
 			pipeline.capture(eventType, dedupeKey, collectionLogSource(), items, details, "loot".equals(eventType));
+		if (bingo.shouldCaptureCollectionLog(items))
+		{
+			HashMap<String, Object> bingoDetails = new HashMap<>(details);
+			bingo.decorateDetails(bingoDetails);
+			pipeline.capture(bingo.eventType(), dedupeKey, collectionLogSource(), items, bingoDetails, true,
+				bingo.rulesVersion(), bingo.screenshotRequired(), bingo.finalizeSubmission());
+		}
 	}
 
 	static List<String> eventTypesFor(List<AnchorModels.Item> items, AnchorModels.Rules rules)

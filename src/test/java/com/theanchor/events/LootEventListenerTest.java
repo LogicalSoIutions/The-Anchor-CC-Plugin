@@ -44,6 +44,10 @@ public class LootEventListenerTest
 		when(rules.current()).thenReturn(new AnchorModels.Rules());
 		when(bingo.matchingItems(eq(5886), eq("Abyssal Sire"), any())).thenAnswer(invocation ->
 			Collections.singletonList(invocation.<List<AnchorModels.Item>>getArgument(2).get(0)));
+		when(bingo.eventType()).thenReturn("bingo");
+		when(bingo.rulesVersion()).thenReturn("2026-08-04.3");
+		when(bingo.screenshotRequired()).thenReturn(true);
+		when(bingo.finalizeSubmission()).thenReturn(true);
 
 		NPC npc = mock(NPC.class);
 		when(npc.getId()).thenReturn(5886);
@@ -55,7 +59,7 @@ public class LootEventListenerTest
 		listener.onNpcLootReceived(event);
 
 		verify(pipeline).capture(eq("bingo"), eq("twisted bow"), any(AnchorModels.Source.class),
-			any(List.class), any(java.util.Map.class), eq(true));
+			any(List.class), any(java.util.Map.class), eq(true), eq("2026-08-04.3"), eq(true), eq(true));
 	}
 
 	private static void inject(Object target, String fieldName, Object value) throws Exception

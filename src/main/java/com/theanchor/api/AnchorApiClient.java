@@ -79,18 +79,25 @@ public class AnchorApiClient
 	{
 		get("/api/runelite/bingo", true, AnchorModels.BingoEvent.class, callback);
 	}
+	public void getBingoRules(ResultCallback<AnchorModels.BingoRules> callback)
+	{
+		get("/api/runelite/bingo/rules", true, AnchorModels.BingoRules.class, callback);
+	}
 
 	public void uploadEvent(AnchorModels.EventEnvelope metadata, Path screenshot, String format,
 		ResultCallback<AnchorModels.EventResponse> callback)
 	{
 		try
 		{
-			byte[] bytes = Files.readAllBytes(screenshot);
-			MediaType imageType = MediaType.parse("image/" + ("jpg".equals(format) ? "jpeg" : format));
-			MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
-				.addFormDataPart("metadata", null, RequestBody.create(JSON, gson.toJson(metadata)))
-				.addFormDataPart("screenshot", screenshot.getFileName().toString(), RequestBody.create(imageType, bytes))
-				.build();
+			MultipartBody.Builder bodyBuilder = new MultipartBody.Builder().setType(MultipartBody.FORM)
+				.addFormDataPart("metadata", null, RequestBody.create(JSON, gson.toJson(metadata)));
+			if (screenshot != null)
+			{
+				byte[] bytes = Files.readAllBytes(screenshot);
+				MediaType imageType = MediaType.parse("image/" + ("jpg".equals(format) ? "jpeg" : format));
+				bodyBuilder.addFormDataPart("screenshot", screenshot.getFileName().toString(), RequestBody.create(imageType, bytes));
+			}
+			MultipartBody body = bodyBuilder.build();
 			execute(newRequest("/api/runelite/events", true).post(body).build(), AnchorModels.EventResponse.class, callback);
 		}
 		catch (IOException e)

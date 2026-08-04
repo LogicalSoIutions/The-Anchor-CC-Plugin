@@ -48,6 +48,13 @@ public class EventPipeline
 	public void capture(String type, String dedupeKey, AnchorModels.Source source, List<AnchorModels.Item> items,
 		java.util.Map<String, Object> details, boolean includeParty)
 	{
+		capture(type, dedupeKey, source, items, details, includeParty, null, true, true);
+	}
+
+	public void capture(String type, String dedupeKey, AnchorModels.Source source, List<AnchorModels.Item> items,
+		java.util.Map<String, Object> details, boolean includeParty, String rulesVersionOverride,
+		boolean screenshotRequired, boolean finalizeSubmission)
+	{
 		Player local = client.getLocalPlayer();
 		long now = System.currentTimeMillis();
 		if (local == null || local.getName() == null || !deduplicator.accept(type + '|' + dedupeKey, now)) return;
@@ -59,11 +66,28 @@ public class EventPipeline
 		String partySource = source == null ? null : source.name;
 		if (partySource == null && details != null && details.get("record") instanceof AnchorModels.PbRecord)
 			partySource = ((AnchorModels.PbRecord) details.get("record")).activity;
-		envelope.party = includeParty ? parties.snapshot(partySource) : null; envelope.rulesVersion = rules.current().version; envelope.pluginVersion = AnchorApiClient.PLUGIN_VERSION;
+		envelope.party = includeParty ? parties.snapshot(partySource) : null;
+		envelope.rulesVersion = rulesVersionOverride == null || rulesVersionOverride.isBlank()
+			? rules.current().version : rulesVersionOverride;
+		envelope.pluginVersion = AnchorApiClient.PLUGIN_VERSION;
 		envelope.context.put("world", client.getWorld()); envelope.context.put("gameCycle", client.getGameCycle());
 		envelope.context.put("submissionGroupId", group.id);
 		envelope.context.put("submissionTypes", group.types());
+		envelope.context.put("finalizeSubmission", finalizeSubmission);
 		refreshStoredGroup(group);
+		if (!screenshotRequired)
+		{
+			try
+			{
+				EvidenceStore.Record record = store.saveMetadata(envelope); notifyListeners();
+				upload(record, false);
+			}
+			catch (Exception e)
+			{
+				log.warn("Could not save evidence metadata for event {} ({})", envelope.eventId, envelope.eventType, e);
+			}
+			return;
+		}
 		screenshots.captureNextFrame(image ->
 		{
 			if (image == null)
@@ -123,7 +147,9 @@ public class EventPipeline
 			return;
 		}
 		record.status = AnchorModels.EventStatus.UPLOADING; record.error = null; record.updatedAt = Instant.now().toString(); persist(record);
-		api.uploadEvent(record.metadata, Path.of(record.screenshotPath), record.format, result ->
+		Path screenshot = record.screenshotPath == null || record.screenshotPath.isBlank()
+			? null : Path.of(record.screenshotPath);
+		api.uploadEvent(record.metadata, screenshot, record.format, result ->
 		{
 			if (result.isSuccessful() && result.value != null)
 			{

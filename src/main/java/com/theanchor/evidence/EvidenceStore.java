@@ -43,6 +43,16 @@ public class EvidenceStore
 		return record;
 	}
 
+	public synchronized Record saveMetadata(AnchorModels.EventEnvelope envelope) throws IOException
+	{
+		Record record = new Record();
+		record.metadata = envelope;
+		record.status = AnchorModels.EventStatus.PENDING;
+		record.updatedAt = Instant.now().toString();
+		writeRecord(record);
+		return record;
+	}
+
 	public synchronized void writeRecord(Record record) throws IOException
 	{
 		Path outbox = root.resolve("outbox"); Files.createDirectories(outbox);

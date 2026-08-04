@@ -150,6 +150,34 @@ public final class AnchorModels
 		public String eventTitle;
 		public List<Integer> itemIds = new ArrayList<>();
 		public List<Integer> bossIds = new ArrayList<>();
+		public Map<String, BingoTeam> teamsByDiscordId = new LinkedHashMap<>();
+	}
+	public static final class BingoTeam
+	{
+		public String teamId;
+		public String teamName;
+	}
+	public static final class BingoRules
+	{
+		public int schemaVersion = 1;
+		public String rulesVersion;
+		public List<Integer> itemIds = new ArrayList<>();
+		public List<Integer> bossIds = new ArrayList<>();
+		public BingoTriggers triggers = new BingoTriggers();
+		public BingoEvidence evidence = new BingoEvidence();
+	}
+	public static final class BingoTriggers
+	{
+		public boolean matchingItem;
+		public boolean bossCollectionLog;
+		public boolean bossPet;
+		public boolean ordinaryBossLoot;
+	}
+	public static final class BingoEvidence
+	{
+		public String eventType = "bingo";
+		public boolean screenshotRequired = true;
+		public boolean finalizeSubmission = true;
 	}
 
 	public enum EventStatus { PENDING, UPLOADING, DRAFT, SUBMITTED, APPROVED, REJECTED, FAILED }

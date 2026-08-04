@@ -19,5 +19,18 @@ public class EvidenceStoreTest
 		String json = Files.readString(root.resolve("outbox").resolve("event-1.json"));
 		assertFalse(json.contains("authenticationCode")); assertFalse(json.contains("Authorization")); assertEquals(1, store.records().size());
 	}
+
+	@Test public void persistsMetadataOnlyEventWithoutScreenshot() throws Exception
+	{
+		Path root = Files.createTempDirectory("anchor-metadata-test");
+		EvidenceStore store = new EvidenceStore(new Gson(), root);
+		AnchorModels.EventEnvelope event = new AnchorModels.EventEnvelope();
+		event.eventId = "event-no-proof"; event.eventType = "bingo"; event.capturedAt = "2026-08-04T00:00:00Z";
+		EvidenceStore.Record record = store.saveMetadata(event);
+		assertNull(record.screenshotPath);
+		assertNull(record.format);
+		assertEquals(AnchorModels.EventStatus.PENDING, record.status);
+		assertTrue(Files.exists(root.resolve("outbox").resolve("event-no-proof.json")));
+	}
 }
 

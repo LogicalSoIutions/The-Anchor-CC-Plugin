@@ -47,6 +47,7 @@ public class LootEventListener
 
 	private void dispatch(Collection<ItemStack> stacks, String sourceName, Integer sourceId, String sourceType)
 	{
+		bingo.observeSource(sourceId, sourceName);
 		List<AnchorModels.Item> allItems = new ArrayList<>();
 		List<AnchorModels.Item> eligible = new ArrayList<>();
 		for (ItemStack stack : stacks)
@@ -65,7 +66,7 @@ public class LootEventListener
 		// Use the item as the key so a collection-log notification for the same drop does not
 		// create a second loot submission moments after RuneLite's loot event.
 		if (!eligible.isEmpty()) capture("loot", eligible, source);
-		if (!bingoItems.isEmpty()) capture("bingo", bingoItems, source);
+		if (!bingoItems.isEmpty()) captureBingo(bingoItems, source);
 	}
 
 	private void capture(String type, List<AnchorModels.Item> items, AnchorModels.Source source)
@@ -75,9 +76,18 @@ public class LootEventListener
 			: first.name.trim().toLowerCase(java.util.Locale.ROOT);
 		Map<String, Object> details = new LinkedHashMap<>();
 		if (first.name != null) details.put("itemName", first.name);
-		AnchorModels.BingoEvent active = bingo.current();
-		if ("bingo".equals(type) && active != null && active.eventTitle != null)
-			details.put("eventTitle", active.eventTitle);
 		pipeline.capture(type, key, source, items, details, true);
+	}
+
+	private void captureBingo(List<AnchorModels.Item> items, AnchorModels.Source source)
+	{
+		AnchorModels.Item first = items.get(0);
+		String key = first.name == null ? String.valueOf(first.itemId)
+			: first.name.trim().toLowerCase(java.util.Locale.ROOT);
+		Map<String, Object> details = new LinkedHashMap<>();
+		if (first.name != null) details.put("itemName", first.name);
+		bingo.decorateDetails(details);
+		pipeline.capture(bingo.eventType(), key, source, items, details, true, bingo.rulesVersion(),
+			bingo.screenshotRequired(), bingo.finalizeSubmission());
 	}
 }
