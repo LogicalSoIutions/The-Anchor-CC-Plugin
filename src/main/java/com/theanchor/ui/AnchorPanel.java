@@ -546,9 +546,11 @@ public class AnchorPanel extends PluginPanel {
 					"Drops, personal bests, collection log entries, pets, and combat achievements will appear here."));
 			return;
 		}
-		for (EvidenceStore.Record record : records) {
+		for (EvidenceStore.Record record : groupedRecords(records)) {
+			List<EvidenceStore.Record> group = pipeline.groupRecords(record);
+			AnchorModels.EventStatus displayStatus = groupStatus(group);
 			JPanel card = card();
-			card.add(submissionHeading(record));
+			card.add(submissionHeading(record, displayStatus, group));
 			if (record.error != null)
 				card.add(wrappedMuted(record.error));
 			JSpinner party = new JSpinner(new SpinnerNumberModel(
@@ -580,7 +582,7 @@ public class AnchorPanel extends PluginPanel {
 				if (!memberNames.isEmpty())
 					card.add(wrappedMuted(memberNames));
 			}
-			if (record.status == AnchorModels.EventStatus.DRAFT) {
+			if (displayStatus == AnchorModels.EventStatus.DRAFT) {
 				card.add(Box.createVerticalStrut(4));
 				card.add(label("Notes", false));
 				card.add(notes);
@@ -589,12 +591,12 @@ public class AnchorPanel extends PluginPanel {
 			JButton proof = actionButton("View proof", false);
 			proof.addActionListener(e -> showProof(record));
 			actionButtons.add(proof);
-			if (record.status == AnchorModels.EventStatus.FAILED || record.status == AnchorModels.EventStatus.PENDING) {
+			if (displayStatus == AnchorModels.EventStatus.FAILED || displayStatus == AnchorModels.EventStatus.PENDING) {
 				JButton retry = actionButton("Retry", true);
-				retry.addActionListener(e -> pipeline.upload(record, true));
+				retry.addActionListener(e -> pipeline.retryGroup(record));
 				actionButtons.add(retry);
 			}
-			if (record.status == AnchorModels.EventStatus.DRAFT) {
+			if (displayStatus == AnchorModels.EventStatus.DRAFT) {
 				JButton submit = actionButton("Submit", true);
 				submit.addActionListener(e -> {
 					int partySize = (Integer) party.getValue();
@@ -604,7 +606,7 @@ public class AnchorPanel extends PluginPanel {
 						JOptionPane.showMessageDialog(this, "Clan and non-clan members cannot exceed party size.");
 						return;
 					}
-					pipeline.updateAndSubmit(record, partySize, clanCount, nonClanCount, notes.getText());
+					pipeline.updateAndSubmitGroup(record, partySize, clanCount, nonClanCount, notes.getText());
 				});
 				actionButtons.add(submit);
 			}
@@ -612,7 +614,7 @@ public class AnchorPanel extends PluginPanel {
 			discard.addActionListener(e -> {
 				if (JOptionPane.showConfirmDialog(this, "Remove this local evidence?", "Discard",
 						JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-					evidence.deleteLocal(record.metadata.eventId);
+					for (EvidenceStore.Record member : group) evidence.deleteLocal(member.metadata.eventId);
 					refresh();
 				}
 			});
@@ -623,6 +625,45 @@ public class AnchorPanel extends PluginPanel {
 			submissions.add(card);
 			submissions.add(Box.createVerticalStrut(7));
 		}
+	}
+
+	private static List<EvidenceStore.Record> groupedRecords(List<EvidenceStore.Record> records) {
+		java.util.Map<String, List<EvidenceStore.Record>> groups = new java.util.LinkedHashMap<>();
+		for (EvidenceStore.Record record : records) {
+			String groupId = EventPipeline.submissionGroupId(record);
+			String key = groupId == null ? "event:" + record.metadata.eventId : "group:" + groupId;
+			groups.computeIfAbsent(key, ignored -> new java.util.ArrayList<>()).add(record);
+		}
+		List<EvidenceStore.Record> result = new java.util.ArrayList<>();
+		for (List<EvidenceStore.Record> group : groups.values()) result.add(preferredRecord(group));
+		return result;
+	}
+
+	private static EvidenceStore.Record preferredRecord(List<EvidenceStore.Record> group) {
+		EvidenceStore.Record preferred = group.get(0);
+		for (EvidenceStore.Record record : group) {
+			if (eventPriority(record) < eventPriority(preferred)) preferred = record;
+		}
+		return preferred;
+	}
+
+	private static int eventPriority(EvidenceStore.Record record) {
+		String type = record == null || record.metadata == null ? null : record.metadata.eventType;
+		if ("bingo".equals(type)) return 0;
+		if ("loot".equals(type)) return 1;
+		if ("personal_best".equals(type)) return 2;
+		return 3;
+	}
+
+	private static AnchorModels.EventStatus groupStatus(List<EvidenceStore.Record> group) {
+		if (group == null || group.isEmpty()) return AnchorModels.EventStatus.PENDING;
+		for (AnchorModels.EventStatus candidate : new AnchorModels.EventStatus[] {
+			AnchorModels.EventStatus.FAILED, AnchorModels.EventStatus.PENDING, AnchorModels.EventStatus.UPLOADING,
+			AnchorModels.EventStatus.DRAFT, AnchorModels.EventStatus.REJECTED, AnchorModels.EventStatus.SUBMITTED,
+			AnchorModels.EventStatus.APPROVED }) {
+			for (EvidenceStore.Record record : group) if (record.status == candidate) return candidate;
+		}
+		return group.get(0).status;
 	}
 
 	private static String partyMemberNames(AnchorModels.Party party) {
@@ -641,13 +682,14 @@ public class AnchorPanel extends PluginPanel {
 		return names.length() == 7 ? "" : names.toString();
 	}
 
-	private JPanel submissionHeading(EvidenceStore.Record record) {
+	private JPanel submissionHeading(EvidenceStore.Record record, AnchorModels.EventStatus displayStatus,
+			List<EvidenceStore.Record> group) {
 		JPanel heading = new JPanel(new BorderLayout(7, 0));
 		heading.setOpaque(false);
 		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 		JPanel text = verticalPanel();
 		text.setOpaque(false);
-		text.add(sectionHeading(eventLabel(record)));
+		text.add(sectionHeading(eventLabel(record, group)));
 		text.add(Box.createVerticalStrut(2));
 		JLabel title = new JLabel(title(record));
 		title.setForeground(Color.WHITE);
@@ -655,7 +697,7 @@ public class AnchorPanel extends PluginPanel {
 		title.setToolTipText(title.getText());
 		text.add(title);
 		heading.add(text, BorderLayout.CENTER);
-		heading.add(statusBadge(record.status), BorderLayout.EAST);
+		heading.add(statusBadge(displayStatus), BorderLayout.EAST);
 		Integer itemId = submissionItemId(record);
 		String activity = pbActivity(record);
 		if (itemId != null) {
@@ -1068,11 +1110,33 @@ public class AnchorPanel extends PluginPanel {
 		return p;
 	}
 
-	private static String eventLabel(EvidenceStore.Record record) {
+	private static String eventLabel(EvidenceStore.Record record, List<EvidenceStore.Record> group) {
 		String type = record.metadata == null ? null : record.metadata.eventType;
 		if (type == null)
 			return "SUBMISSION";
+		java.util.Set<String> groupedTypes = new java.util.HashSet<>();
+		if (group != null)
+			for (EvidenceStore.Record member : group)
+				if (member != null && member.metadata != null && member.metadata.eventType != null)
+					groupedTypes.add(member.metadata.eventType);
+		if (record.metadata.context != null) {
+			Object values = record.metadata.context.get("submissionTypes");
+			if (values instanceof Iterable)
+				for (Object value : (Iterable<?>) values) if (value != null) groupedTypes.add(String.valueOf(value));
+		}
+		if (groupedTypes.size() > 1) {
+			List<String> labels = new java.util.ArrayList<>();
+			if (groupedTypes.contains("bingo")) labels.add("BINGO");
+			if (groupedTypes.contains("loot")) labels.add("LOOT");
+			if (groupedTypes.contains("personal_best")) labels.add("PB");
+			for (String groupedType : groupedTypes)
+				if (!"bingo".equals(groupedType) && !"loot".equals(groupedType) && !"personal_best".equals(groupedType))
+					labels.add(groupedType.replace('_', ' ').toUpperCase(Locale.ROOT));
+			return String.join("+", labels);
+		}
 		switch (type) {
+			case "bingo":
+				return "BINGO";
 			case "loot":
 				return "LOOT DROP";
 			case "personal_best":

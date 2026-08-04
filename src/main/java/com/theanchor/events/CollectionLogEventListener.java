@@ -61,20 +61,21 @@ public class CollectionLogEventListener
 	{
 		if (itemName.isEmpty()) return;
 		List<AnchorModels.Item> items = collectionLogItems(itemName);
-		String eventType = eventTypeFor(items, rules.current());
 		HashMap<String, Object> details = new HashMap<>();
 		details.put("itemName", itemName);
 		details.put("detectionSource", detectionSource);
-		pipeline.capture(eventType, itemName.toLowerCase(java.util.Locale.ROOT), collectionLogSource(), items, details,
-			"loot".equals(eventType));
+		String dedupeKey = itemName.toLowerCase(java.util.Locale.ROOT);
+		for (String eventType : eventTypesFor(items, rules.current()))
+			pipeline.capture(eventType, dedupeKey, collectionLogSource(), items, details, "loot".equals(eventType));
 	}
 
-	static String eventTypeFor(List<AnchorModels.Item> items, AnchorModels.Rules rules)
+	static List<String> eventTypesFor(List<AnchorModels.Item> items, AnchorModels.Rules rules)
 	{
 		if (items != null)
 			for (AnchorModels.Item item : items)
-				if (LootEligibility.meetsMinimumValue(item, rules)) return "loot";
-		return "collection_log";
+				if (LootEligibility.meetsMinimumValue(item, rules))
+					return java.util.Arrays.asList("collection_log", "loot");
+		return Collections.singletonList("collection_log");
 	}
 
 	static String normalizeItemName(String value)

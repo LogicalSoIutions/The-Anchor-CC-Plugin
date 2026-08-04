@@ -7,8 +7,14 @@ import com.theanchor.service.PartyTracker;
 import com.theanchor.service.RulesService;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -25,6 +31,8 @@ public class EventPipeline
 	private static final Logger log = LoggerFactory.getLogger(EventPipeline.class);
 	private final EventDeduplicator deduplicator = new EventDeduplicator(8_000L);
 	private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
+	private final Map<String, CaptureGroup> captureGroups = new ConcurrentHashMap<>();
+	private volatile CaptureGroup recentTriggerGroup;
 	@Inject private Client client;
 	@Inject private AnchorConfig config;
 	@Inject private ScreenshotService screenshots;
@@ -41,7 +49,9 @@ public class EventPipeline
 		java.util.Map<String, Object> details, boolean includeParty)
 	{
 		Player local = client.getLocalPlayer();
-		if (local == null || local.getName() == null || !deduplicator.accept(type + '|' + dedupeKey, System.currentTimeMillis())) return;
+		long now = System.currentTimeMillis();
+		if (local == null || local.getName() == null || !deduplicator.accept(type + '|' + dedupeKey, now)) return;
+		CaptureGroup group = groupFor(type, source, details, now);
 		AnchorModels.EventEnvelope envelope = new AnchorModels.EventEnvelope();
 		envelope.eventId = UUID.randomUUID().toString(); envelope.eventType = type; envelope.capturedAt = Instant.now().toString();
 		envelope.player = new AnchorModels.PlayerIdentity(); envelope.player.name = local.getName(); envelope.player.accountHash = String.valueOf(client.getAccountHash());
@@ -51,6 +61,9 @@ public class EventPipeline
 			partySource = ((AnchorModels.PbRecord) details.get("record")).activity;
 		envelope.party = includeParty ? parties.snapshot(partySource) : null; envelope.rulesVersion = rules.current().version; envelope.pluginVersion = AnchorApiClient.PLUGIN_VERSION;
 		envelope.context.put("world", client.getWorld()); envelope.context.put("gameCycle", client.getGameCycle());
+		envelope.context.put("submissionGroupId", group.id);
+		envelope.context.put("submissionTypes", group.types());
+		refreshStoredGroup(group);
 		screenshots.captureNextFrame(image ->
 		{
 			if (image == null)
@@ -60,6 +73,7 @@ public class EventPipeline
 			}
 			try
 			{
+				envelope.context.put("submissionTypes", group.types());
 				EvidenceStore.Record record = store.save(envelope, image); notifyListeners();
 				upload(record, false);
 			}
@@ -74,6 +88,30 @@ public class EventPipeline
 	{
 		for (EvidenceStore.Record record : store.records())
 			if (record.status == AnchorModels.EventStatus.PENDING || record.status == AnchorModels.EventStatus.FAILED) upload(record, true);
+	}
+
+	public List<EvidenceStore.Record> groupRecords(EvidenceStore.Record record)
+	{
+		String groupId = submissionGroupId(record);
+		if (groupId == null) return record == null ? java.util.Collections.emptyList() : java.util.Collections.singletonList(record);
+		List<EvidenceStore.Record> matches = new ArrayList<>();
+		for (EvidenceStore.Record candidate : store.records())
+			if (groupId.equals(submissionGroupId(candidate))) matches.add(candidate);
+		return matches;
+	}
+
+	public void retryGroup(EvidenceStore.Record record)
+	{
+		for (EvidenceStore.Record member : groupRecords(record))
+			if (member.status == AnchorModels.EventStatus.PENDING || member.status == AnchorModels.EventStatus.FAILED)
+				upload(member, true);
+	}
+
+	public void updateAndSubmitGroup(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers, String notes)
+	{
+		for (EvidenceStore.Record member : groupRecords(record))
+			if (member.status == AnchorModels.EventStatus.DRAFT)
+				updateAndSubmit(member, partySize, clanMembers, nonClanMembers, notes);
 	}
 
 	public void upload(EvidenceStore.Record record, boolean manual)
@@ -184,6 +222,68 @@ public class EventPipeline
 		notifyListeners();
 	}
 	private void notifyListeners() { for (Runnable listener : listeners) listener.run(); }
+
+	private synchronized CaptureGroup groupFor(String type, AnchorModels.Source source,
+		java.util.Map<String, Object> details, long now)
+	{
+		String key = encounterKey(source, details);
+		CaptureGroup group = key == null ? null : captureGroups.get(key);
+		if (group == null || now - group.lastSeen > 8_000L || group.contains(type))
+		{
+			CaptureGroup recent = recentTriggerGroup;
+			boolean triggerPair = recent != null && now - recent.lastSeen <= 4_000L
+				&& (("bingo".equals(type) && recent.contains("personal_best"))
+					|| ("personal_best".equals(type) && recent.contains("bingo")));
+			group = triggerPair ? recent : new CaptureGroup(UUID.randomUUID().toString(), now);
+			if (key != null) captureGroups.put(key, group);
+		}
+		group.add(type, now);
+		if ("bingo".equals(type) || "personal_best".equals(type) || group.contains("bingo")) recentTriggerGroup = group;
+		return group;
+	}
+
+	private void refreshStoredGroup(CaptureGroup group)
+	{
+		for (EvidenceStore.Record record : store.records())
+		{
+			if (!group.id.equals(submissionGroupId(record)) || record.metadata == null) continue;
+			record.metadata.context.put("submissionTypes", group.types());
+			try { store.writeRecord(record); }
+			catch (Exception e) { log.warn("Could not update submission group {}", group.id, e); }
+		}
+	}
+
+	private static String encounterKey(AnchorModels.Source source, java.util.Map<String, Object> details)
+	{
+		String value = source == null ? null : source.name;
+		if ((value == null || value.isBlank()) && details != null)
+		{
+			Object record = details.get("record");
+			if (record instanceof AnchorModels.PbRecord) value = ((AnchorModels.PbRecord) record).activity;
+			else if (record instanceof java.util.Map) value = String.valueOf(((java.util.Map<?, ?>) record).get("activity"));
+		}
+		if (value == null || value.isBlank() || "null".equals(value)) return null;
+		return value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
+	}
+
+	public static String submissionGroupId(EvidenceStore.Record record)
+	{
+		if (record == null || record.metadata == null || record.metadata.context == null) return null;
+		Object value = record.metadata.context.get("submissionGroupId");
+		return value == null ? null : String.valueOf(value);
+	}
+
+	private static final class CaptureGroup
+	{
+		private final String id;
+		private final Set<String> eventTypes = new LinkedHashSet<>();
+		private long lastSeen;
+		private CaptureGroup(String id, long lastSeen) { this.id = id; this.lastSeen = lastSeen; }
+		private synchronized void add(String type, long seen) { eventTypes.add(type); lastSeen = seen; }
+		private synchronized boolean contains(String type) { return eventTypes.contains(type); }
+		private synchronized List<String> types() { return new ArrayList<>(eventTypes); }
+	}
+
 	private static String eventId(EvidenceStore.Record record) { return record == null || record.metadata == null ? "unknown" : record.metadata.eventId; }
 	private static String eventType(EvidenceStore.Record record) { return record == null || record.metadata == null ? "unknown" : record.metadata.eventType; }
 	private static String validationSummary(List<AnchorModels.ValidationMessage> messages)

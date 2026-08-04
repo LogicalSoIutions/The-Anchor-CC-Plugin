@@ -144,6 +144,14 @@ public final class AnchorModels
 		public long minimumLootValue = BASE_MINIMUM_LOOT_VALUE;
 	}
 
+	public static final class BingoEvent
+	{
+		public boolean active;
+		public String eventTitle;
+		public List<Integer> itemIds = new ArrayList<>();
+		public List<Integer> bossIds = new ArrayList<>();
+	}
+
 	public enum EventStatus { PENDING, UPLOADING, DRAFT, SUBMITTED, APPROVED, REJECTED, FAILED }
 
 	public static final class EventEnvelope

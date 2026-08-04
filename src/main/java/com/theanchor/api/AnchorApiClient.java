@@ -75,6 +75,10 @@ public class AnchorApiClient
 
 	public void validateSession(ResultCallback<Map> callback) { get("/api/runelite/session", true, Map.class, callback); }
 	public void getRules(ResultCallback<AnchorModels.Rules> callback) { get("/api/runelite/rules", true, AnchorModels.Rules.class, callback); }
+	public void getBingo(ResultCallback<AnchorModels.BingoEvent> callback)
+	{
+		get("/api/runelite/bingo", true, AnchorModels.BingoEvent.class, callback);
+	}
 
 	public void uploadEvent(AnchorModels.EventEnvelope metadata, Path screenshot, String format,
 		ResultCallback<AnchorModels.EventResponse> callback)

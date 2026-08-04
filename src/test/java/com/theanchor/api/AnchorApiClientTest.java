@@ -122,4 +122,28 @@ public class AnchorApiClientTest
 			assertTrue(request.getBody().readUtf8().contains("progress-1"));
 		}
 	}
+
+	@Test public void readsAuthenticatedBingoEvent() throws Exception
+	{
+		try (MockWebServer server = new MockWebServer())
+		{
+			server.enqueue(new MockResponse().setResponseCode(200)
+				.setBody("{\"active\":true,\"eventTitle\":\"The Anchor Bingo\",\"itemIds\":[20997],\"bossIds\":[5886]}"));
+			server.start();
+			AnchorConfig config = mock(AnchorConfig.class);
+			when(config.apiBaseUrl()).thenReturn(server.url("/").toString());
+			when(config.authenticationCode()).thenReturn("CODE");
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config);
+			CountDownLatch latch = new CountDownLatch(1);
+			final AnchorModels.BingoEvent[] event = new AnchorModels.BingoEvent[1];
+			api.getBingo(result -> { event[0] = result.value; latch.countDown(); });
+			assertTrue(latch.await(3, TimeUnit.SECONDS));
+			assertTrue(event[0].active);
+			assertEquals("The Anchor Bingo", event[0].eventTitle);
+			assertEquals(Integer.valueOf(20997), event[0].itemIds.get(0));
+			RecordedRequest request = server.takeRequest();
+			assertEquals("/api/runelite/bingo", request.getPath());
+			assertEquals("Bearer CODE", request.getHeader("Authorization"));
+		}
+	}
 }

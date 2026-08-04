@@ -7,6 +7,7 @@ package com.theanchor;
 import com.theanchor.evidence.EventPipeline;
 import com.theanchor.pb.PersonalBestService;
 import com.theanchor.service.AnchorDataService;
+import com.theanchor.service.BingoService;
 import com.theanchor.service.EventAlertService;
 import java.lang.reflect.Field;
 import net.runelite.api.Client;
@@ -37,11 +38,13 @@ public class AnchorPluginLoginTest
 		PersonalBestService pbs = mock(PersonalBestService.class);
 		EventPipeline pipeline = mock(EventPipeline.class);
 		EventAlertService eventAlerts = mock(EventAlertService.class);
+		BingoService bingo = mock(BingoService.class);
 		inject(plugin, "client", client);
 		inject(plugin, "data", data);
 		inject(plugin, "pbs", pbs);
 		inject(plugin, "pipeline", pipeline);
 		inject(plugin, "eventAlerts", eventAlerts);
+		inject(plugin, "bingo", bingo);
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
 
 		GameStateChanged loggedIn = mock(GameStateChanged.class);
@@ -56,6 +59,7 @@ public class AnchorPluginLoginTest
 
 		verify(data).refresh("Zach");
 		verify(pbs).onLogin();
+		verify(bingo).refresh();
 		verify(pipeline).refreshStatuses("Zach");
 
 		plugin.onGameTick(mock(GameTick.class));

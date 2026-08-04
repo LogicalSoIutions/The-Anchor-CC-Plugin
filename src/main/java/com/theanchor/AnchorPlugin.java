@@ -15,10 +15,12 @@ import com.theanchor.events.PetEventListener;
 import com.theanchor.pb.PersonalBestService;
 import com.theanchor.progress.PlayerProgressService;
 import com.theanchor.service.AnchorDataService;
+import com.theanchor.service.BingoService;
 import com.theanchor.service.EventAlertService;
 import com.theanchor.service.ImageCache;
 import com.theanchor.service.PartyTracker;
 import com.theanchor.ui.AnchorPanel;
+import com.theanchor.ui.BingoEventOverlay;
 import com.theanchor.ui.CollectionLogSyncOverlay;
 import com.theanchor.ui.CollectionLogAutoSync;
 import com.theanchor.ui.CollectionLogRefreshButton;
@@ -69,6 +71,7 @@ public class AnchorPlugin extends Plugin
 	@Inject private ConfigManager configManager;
 	@Inject private AnchorPanel panel;
 	@Inject private AnchorDataService data;
+	@Inject private BingoService bingo;
 	@Inject private EvidenceStore evidence;
 	@Inject private EventPipeline pipeline;
 	@Inject private ImageCache imageCache;
@@ -80,6 +83,7 @@ public class AnchorPlugin extends Plugin
 	@Inject private CollectionLogRefreshButton collectionLogRefreshButton;
 	@Inject private EventAlertService eventAlerts;
 	@Inject private EventAlertOverlay eventAlertOverlay;
+	@Inject private BingoEventOverlay bingoEventOverlay;
 	@Inject private PartyTracker parties;
 	@Inject private LootEventListener loot;
 	@Inject private CollectionLogEventListener collectionLog;
@@ -99,6 +103,7 @@ public class AnchorPlugin extends Plugin
 		navigation = NavigationButton.builder().tooltip("The Anchor").icon(loadIcon()).priority(5).panel(panel).build(); toolbar.addNavigation(navigation);
 		overlayManager.add(collectionLogSyncOverlay);
 		overlayManager.add(eventAlertOverlay);
+		overlayManager.add(bingoEventOverlay);
 		collectionLogAutoSync.startUp();
 		collectionLogRefreshButton.startUp();
 		registered = Arrays.asList(parties, loot, collectionLog, collectionLogSync, pets, combatTiers, pbs);
@@ -124,7 +129,9 @@ public class AnchorPlugin extends Plugin
 		if (navigation != null) { toolbar.removeNavigation(navigation); navigation = null; }
 		overlayManager.remove(collectionLogSyncOverlay);
 		overlayManager.remove(eventAlertOverlay);
+		overlayManager.remove(bingoEventOverlay);
 		eventAlerts.resetStateForWorldHopOrLogin();
+		bingo.clear();
 		activePlayerName = null;
 		firstConnectionSyncedAccount = null;
 		data.loggedOut(); log.info("The Anchor plugin stopped");
@@ -143,6 +150,7 @@ public class AnchorPlugin extends Plugin
 		{
 			activePlayerName = null;
 			firstConnectionSyncedAccount = null;
+			bingo.clear();
 			data.loggedOut();
 		}
 	}
@@ -154,7 +162,7 @@ public class AnchorPlugin extends Plugin
 		if (!AnchorConfig.GROUP.equals(event.getGroup())) return;
 		switch (event.getKey())
 		{
-			case "authenticationCode": firstConnectionSyncedAccount = null; data.validate(); pipeline.retryAll(); break;
+			case "authenticationCode": firstConnectionSyncedAccount = null; data.validate(); bingo.refresh(); pipeline.retryAll(); break;
 			case "animatedBanner": panel.refreshBanner(); break;
 			case "eventAlerts": eventAlerts.resetStateForWorldHopOrLogin(); break;
 			case "refreshProfile": if (Boolean.parseBoolean(event.getNewValue())) { refreshCurrentPlayer(); resetAction(event.getKey()); } break;
@@ -176,7 +184,7 @@ public class AnchorPlugin extends Plugin
 		if (name.equals(activePlayerName)) { syncFirstConnectionData(); return; }
 		activePlayerName = name;
 		firstConnectionSyncedAccount = null;
-		data.refresh(name); pbs.onLogin(); syncFirstConnectionData(); pipeline.retryAll(); pipeline.refreshStatuses(name);
+		data.refresh(name); bingo.refresh(); pbs.onLogin(); syncFirstConnectionData(); pipeline.retryAll(); pipeline.refreshStatuses(name);
 	}
 	private void syncFirstConnectionData()
 	{
@@ -195,7 +203,7 @@ public class AnchorPlugin extends Plugin
 	{
 		String name = currentName();
 		if (name == null || name.isBlank()) return;
-		data.refresh(name); pipeline.refreshStatuses(name);
+		data.refresh(name); bingo.refresh(); pipeline.refreshStatuses(name);
 	}
 	private void runScheduledRefresh()
 	{
