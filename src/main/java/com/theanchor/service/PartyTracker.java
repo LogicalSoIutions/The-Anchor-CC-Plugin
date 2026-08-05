@@ -15,10 +15,14 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.clan.ClanSettings;
+import net.runelite.api.events.ActorDeath;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.NpcSpawned;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
@@ -29,6 +33,8 @@ import net.runelite.client.util.Text;
 public class PartyTracker
 {
 	private static final int ENCOUNTER_IDLE_TICKS = 12;
+	private static final long RECENT_RAID_SOURCE_MILLIS = 15_000L;
+	private static final long COMPLETED_RAID_MILLIS = 10 * 60_000L;
 	private static final int TOA_MEMBER_NAME = 1099;
 	private static final int TOB_MEMBER_NAME = 330;
 
@@ -36,10 +42,19 @@ public class PartyTracker
 	private NPC target;
 	private final Map<Player, Boolean> participants = new IdentityHashMap<>();
 	private int idleTicks;
+	private volatile String recentRaidSource;
+	private volatile long recentRaidSourceAt;
+	private String activeRaidSource;
+	private List<String> activeRaidNames = List.of();
+	private AnchorModels.Party completedRaidParty;
+	private String completedRaidSource;
+	private long completedRaidAt;
+	private boolean awaitingCompletedRosterClear;
 
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		pollRaidRoster();
 		Player local = client.getLocalPlayer();
 		Actor interacting = local == null ? null : local.getInteracting();
 		if (interacting instanceof NPC)
@@ -61,10 +76,14 @@ public class PartyTracker
 	public AnchorModels.Party snapshot(String sourceName)
 	{
 		if (!BossRegistry.canBeMulti(sourceName))
+		{
 			return fixedSoloParty();
+		}
 
 		if (BossRegistry.isRaid(sourceName))
 		{
+			AnchorModels.Party stored = storedRaidParty(sourceName);
+			if (stored != null) return stored;
 			List<String> names = raidNames(sourceName);
 			int count = raidCount(sourceName, names.size());
 			if (count > 0) return buildParty(count, names, "raid_party", "high");
@@ -73,6 +92,198 @@ public class PartyTracker
 		List<String> observed = observedNames();
 		if (!observed.isEmpty()) return buildParty(observed.size(), observed, "boss_interaction", "medium");
 		return buildParty(1, localNameList(), "unknown", "low");
+	}
+
+	@Subscribe
+	public void onActorDeath(ActorDeath event)
+	{
+		Actor actor = event.getActor();
+		if (!(actor instanceof NPC)) return;
+		String source = finalBossRaid(((NPC) actor).getName());
+		if (source == null) return;
+		List<String> finalNames = raidNames(source);
+		if (!finalNames.isEmpty()) updateActiveRaid(source, finalNames);
+		List<String> confirmedNames = finalNames.isEmpty() ? activeRaidNames : finalNames;
+		if (confirmedNames.isEmpty()) confirmedNames = localNameList();
+		completedRaidSource = source;
+		completedRaidParty = buildParty(raidCount(source, confirmedNames.size()), confirmedNames,
+			"raid_party_final_boss", "high");
+		completedRaidAt = System.currentTimeMillis();
+		activeRaidSource = null;
+		activeRaidNames = List.of();
+		awaitingCompletedRosterClear = true;
+	}
+
+	@Subscribe
+	public void onNpcSpawned(NpcSpawned event)
+	{
+		NPC npc = event.getNpc();
+		if (npc == null) return;
+		String source = firstBossRaid(npc.getName());
+		if (source == null || (activeRaidSource != null && !sameRaid(source, activeRaidSource))) return;
+		List<String> names = raidNames(source);
+		if (names.isEmpty()) return;
+		awaitingCompletedRosterClear = false;
+		if (sameRaid(source, completedRaidSource)) clearCompletedRaid();
+		updateActiveRaid(source, names);
+	}
+
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged event)
+	{
+		if (event.getGameState() == GameState.LOGIN_SCREEN || event.getGameState() == GameState.HOPPING)
+		{
+			activeRaidSource = null;
+			activeRaidNames = List.of();
+			completedRaidParty = null;
+			completedRaidSource = null;
+			completedRaidAt = 0;
+			awaitingCompletedRosterClear = false;
+		}
+	}
+
+	/** Remember named raid loot before event filtering/deduplication so collection-log events share its category. */
+	public void observeSource(String sourceName)
+	{
+		if (!BossRegistry.isRaid(sourceName)) return;
+		recentRaidSource = sourceName;
+		recentRaidSourceAt = System.currentTimeMillis();
+		if (sameRaid(sourceName, activeRaidSource)) activeRaidSource = sourceName;
+		if (sameRaid(sourceName, completedRaidSource)) completedRaidSource = sourceName;
+	}
+
+	/** Replace the synthetic Collection Log category when RuneLite just identified raid loot. */
+	public AnchorModels.Source resolveCollectionLogSource(AnchorModels.Source fallback)
+	{
+		String source = raidContextSource();
+		long age = System.currentTimeMillis() - recentRaidSourceAt;
+		boolean sessionContext = source != null && (sameRaid(source, activeRaidSource)
+			|| (sameRaid(source, completedRaidSource) && completedRaidAt > 0
+				&& System.currentTimeMillis() - completedRaidAt <= COMPLETED_RAID_MILLIS));
+		if (source != null && (sessionContext || (age >= 0 && age <= RECENT_RAID_SOURCE_MILLIS)))
+		{
+			AnchorModels.Source resolved = new AnchorModels.Source();
+			resolved.type = fallback == null ? "collection_log" : fallback.type;
+			resolved.id = fallback == null ? null : fallback.id;
+			resolved.name = source;
+			return resolved;
+		}
+		return fallback;
+	}
+
+	private void pollRaidRoster()
+	{
+		if (awaitingCompletedRosterClear && completedRosterCleared())
+		{
+			awaitingCompletedRosterClear = false;
+		}
+
+		if (activeRaidSource != null)
+		{
+			List<String> names = raidNames(activeRaidSource);
+			if (!names.isEmpty()) updateActiveRaid(activeRaidSource, names);
+			return;
+		}
+
+		if (client.getVarbitValue(VarbitID.RAIDS_CLIENT_INDUNGEON) > 0)
+		{
+			startPolledRaid("Chambers of Xeric", chambersNames());
+			return;
+		}
+		if (toaPartyCount() > 0)
+			startPolledRaid("Tombs of Amascut", varcNames(TOA_MEMBER_NAME, 8));
+	}
+
+	private void startPolledRaid(String source, List<String> names)
+	{
+		if (names.isEmpty() || (awaitingCompletedRosterClear && sameRaid(source, completedRaidSource))) return;
+		if (sameRaid(source, completedRaidSource)) clearCompletedRaid();
+		updateActiveRaid(source, names);
+	}
+
+	private boolean completedRosterCleared()
+	{
+		if (completedRaidSource == null) return true;
+		String source = BossRegistry.normalize(completedRaidSource);
+		if (source.startsWith("chambers of xeric"))
+			return client.getVarbitValue(VarbitID.RAIDS_CLIENT_INDUNGEON) == 0;
+		if (source.startsWith("tombs of amascut"))
+			return toaPartyCount() == 0 || varcNames(TOA_MEMBER_NAME, 8).isEmpty();
+		if (source.startsWith("theatre of blood"))
+			return varcNames(TOB_MEMBER_NAME, 5).isEmpty();
+		return true;
+	}
+
+	private void clearCompletedRaid()
+	{
+		completedRaidParty = null;
+		completedRaidSource = null;
+		completedRaidAt = 0;
+	}
+
+	private void updateActiveRaid(String source, List<String> names)
+	{
+		List<String> cleaned = dedupe(names);
+		if (source.equals(activeRaidSource) && cleaned.equals(activeRaidNames)) return;
+		activeRaidSource = source;
+		activeRaidNames = cleaned;
+		recentRaidSource = source;
+		recentRaidSourceAt = System.currentTimeMillis();
+	}
+
+	private AnchorModels.Party storedRaidParty(String sourceName)
+	{
+		if (sameRaid(sourceName, activeRaidSource))
+		{
+			return buildParty(activeRaidNames.size(), activeRaidNames, "raid_party_entry", "high");
+		}
+		if (completedRaidParty != null && completedRaidSource != null
+			&& sameRaid(sourceName, completedRaidSource)
+			&& System.currentTimeMillis() - completedRaidAt <= COMPLETED_RAID_MILLIS)
+		{
+			return completedRaidParty;
+		}
+		return null;
+	}
+
+	private String raidContextSource()
+	{
+		if (activeRaidSource != null) return activeRaidSource;
+		if (completedRaidSource != null && completedRaidAt > 0
+			&& System.currentTimeMillis() - completedRaidAt <= COMPLETED_RAID_MILLIS) return completedRaidSource;
+		return recentRaidSource;
+	}
+
+	static String finalBossRaid(String name)
+	{
+		String value = BossRegistry.normalize(clean(name));
+		if (value.startsWith("great olm")) return "Chambers of Xeric";
+		if (value.startsWith("verzik vitur")) return "Theatre of Blood";
+		if (value.startsWith("tumeken's warden") || value.startsWith("tumekens warden")) return "Tombs of Amascut";
+		return null;
+	}
+
+	static String firstBossRaid(String name)
+	{
+		String value = BossRegistry.normalize(clean(name));
+		if (value.startsWith("the maiden of sugadinti")) return "Theatre of Blood";
+		if (value.equals("akkha") || value.startsWith("ba ba") || value.startsWith("baba")
+			|| value.equals("kephri") || value.equals("zebak")) return "Tombs of Amascut";
+		return null;
+	}
+
+	private static boolean sameRaid(String left, String right)
+	{
+		return left != null && right != null && raidKey(left).equals(raidKey(right));
+	}
+
+	private static String raidKey(String source)
+	{
+		String value = BossRegistry.normalize(source);
+		if (value.startsWith("chambers of xeric")) return "chambers of xeric";
+		if (value.startsWith("theatre of blood")) return "theatre of blood";
+		if (value.startsWith("tombs of amascut")) return "tombs of amascut";
+		return value;
 	}
 
 	/** Kept for PB captures and callers without a loot source. */
@@ -91,7 +302,10 @@ public class PartyTracker
 		ClanSettings clan = client.getClanSettings();
 		List<MemberSnapshot> members = new ArrayList<>();
 		for (String name : dedupe(names))
-			members.add(new MemberSnapshot(name, clan == null ? null : clan.findMember(name) != null));
+		{
+			Boolean clanMember = clan == null ? null : clan.findMember(name) != null;
+			members.add(new MemberSnapshot(name, clanMember));
+		}
 		return snapshotFromData(detectedSize, members, method, confidence);
 	}
 
@@ -135,16 +349,20 @@ public class PartyTracker
 		if (source.startsWith("chambers of xeric"))
 			return Math.max(namedCount, client.getVarbitValue(VarbitID.RAIDS_CLIENT_PARTYSIZE));
 		if (source.startsWith("tombs of amascut"))
-			return Math.max(namedCount,
-				Math.min(client.getVarbitValue(VarbitID.TOA_CLIENT_P0), 1)
+			return Math.max(namedCount, toaPartyCount());
+		return namedCount;
+	}
+
+	private int toaPartyCount()
+	{
+		return Math.min(client.getVarbitValue(VarbitID.TOA_CLIENT_P0), 1)
 				+ Math.min(client.getVarbitValue(VarbitID.TOA_CLIENT_P1), 1)
 				+ Math.min(client.getVarbitValue(VarbitID.TOA_CLIENT_P2), 1)
 				+ Math.min(client.getVarbitValue(VarbitID.TOA_CLIENT_P3), 1)
 				+ Math.min(client.getVarbitValue(VarbitID.TOA_CLIENT_P4), 1)
 				+ Math.min(client.getVarbitValue(VarbitID.TOA_CLIENT_P5), 1)
 				+ Math.min(client.getVarbitValue(VarbitID.TOA_CLIENT_P6), 1)
-				+ Math.min(client.getVarbitValue(VarbitID.TOA_CLIENT_P7), 1));
-		return namedCount;
+				+ Math.min(client.getVarbitValue(VarbitID.TOA_CLIENT_P7), 1);
 	}
 
 	private List<String> chambersNames()

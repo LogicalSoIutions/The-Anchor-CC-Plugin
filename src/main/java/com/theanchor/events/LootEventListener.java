@@ -8,6 +8,7 @@ import com.theanchor.evidence.EventPipeline;
 import com.theanchor.model.AnchorModels;
 import com.theanchor.service.BingoService;
 import com.theanchor.service.LootEligibility;
+import com.theanchor.service.PartyTracker;
 import com.theanchor.service.RulesService;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,6 +33,7 @@ public class LootEventListener
 	@Inject private RulesService rules;
 	@Inject private EventPipeline pipeline;
 	@Inject private BingoService bingo;
+	@Inject private PartyTracker parties;
 
 	@Subscribe public void onNpcLootReceived(NpcLootReceived event)
 	{
@@ -47,6 +49,7 @@ public class LootEventListener
 
 	private void dispatch(Collection<ItemStack> stacks, String sourceName, Integer sourceId, String sourceType)
 	{
+		if (parties != null) parties.observeSource(sourceName);
 		bingo.observeSource(sourceId, sourceName);
 		List<AnchorModels.Item> allItems = new ArrayList<>();
 		List<AnchorModels.Item> eligible = new ArrayList<>();

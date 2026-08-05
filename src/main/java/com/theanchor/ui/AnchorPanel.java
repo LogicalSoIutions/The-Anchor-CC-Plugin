@@ -465,11 +465,19 @@ public class AnchorPanel extends PluginPanel {
 		}
 		AnchorModels.Standings standings = profile == null ? null : profile.standings;
 		String playerName = profile == null || profile.member == null ? null : profile.member.name;
-		home.add(competition("BOTW", competitions == null ? null : competitions.botw, data.botwImage(),
+		boolean authRequired = requiresCompetitionAuthentication(data.connection());
+		home.add(competition("BOTW", competitions == null ? null : competitions.botw,
+				authRequired ? data.unauthenticatedBotwImage() : data.botwImage(),
 				standings == null ? null : standings.botwRank, playerName));
 		home.add(Box.createVerticalStrut(8));
-		home.add(competition("SOTW", competitions == null ? null : competitions.sotw, data.sotwImage(),
+		home.add(competition("SOTW", competitions == null ? null : competitions.sotw,
+				authRequired ? data.unauthenticatedSotwImage() : data.sotwImage(),
 				standings == null ? null : standings.sotwRank, playerName));
+	}
+
+	static boolean requiresCompetitionAuthentication(AnchorDataService.Connection connection) {
+		return connection == AnchorDataService.Connection.NOT_CONFIGURED
+				|| connection == AnchorDataService.Connection.INVALID;
 	}
 
 	private JPanel competition(String kind, AnchorModels.CompetitionPanel competition, BufferedImage image,

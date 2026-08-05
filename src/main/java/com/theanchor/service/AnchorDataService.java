@@ -15,6 +15,10 @@ import javax.inject.Singleton;
 @Singleton
 public class AnchorDataService
 {
+	// Replace these with the public images shown when authentication is missing or invalid.
+	static final String UNAUTHENTICATED_BOTW_IMAGE_URL = "";
+	static final String UNAUTHENTICATED_SOTW_IMAGE_URL = "";
+
 	public enum Connection { NOT_CONFIGURED, CHECKING, CONNECTED, INVALID, UNAVAILABLE }
 	@Inject private AnchorApiClient api;
 	@Inject private AnchorConfig config;
@@ -26,6 +30,8 @@ public class AnchorDataService
 	private volatile BufferedImage profileImage;
 	private volatile BufferedImage botwImage;
 	private volatile BufferedImage sotwImage;
+	private volatile BufferedImage unauthenticatedBotwImage;
+	private volatile BufferedImage unauthenticatedSotwImage;
 	private volatile long botwImageCompetitionId = Long.MIN_VALUE;
 	private volatile long sotwImageCompetitionId = Long.MIN_VALUE;
 	private volatile Connection connection = Connection.NOT_CONFIGURED;
@@ -38,6 +44,8 @@ public class AnchorDataService
 	public BufferedImage profileImage() { return profileImage; }
 	public BufferedImage botwImage() { return botwImage; }
 	public BufferedImage sotwImage() { return sotwImage; }
+	public BufferedImage unauthenticatedBotwImage() { return unauthenticatedBotwImage; }
+	public BufferedImage unauthenticatedSotwImage() { return unauthenticatedSotwImage; }
 	public Connection connection() { return connection; }
 	public String message() { return message; }
 
@@ -77,7 +85,22 @@ public class AnchorDataService
 				notifyListeners();
 			});
 		});
+		loadUnauthenticatedCompetitionImages();
 		rules.refresh(this::notifyListeners);
+	}
+
+	private void loadUnauthenticatedCompetitionImages()
+	{
+		if (!UNAUTHENTICATED_BOTW_IMAGE_URL.isBlank())
+		{
+			images.loadWebsiteImage("unauthenticated-botw", UNAUTHENTICATED_BOTW_IMAGE_URL,
+				image -> { unauthenticatedBotwImage = image; notifyListeners(); });
+		}
+		if (!UNAUTHENTICATED_SOTW_IMAGE_URL.isBlank())
+		{
+			images.loadWebsiteImage("unauthenticated-sotw", UNAUTHENTICATED_SOTW_IMAGE_URL,
+				image -> { unauthenticatedSotwImage = image; notifyListeners(); });
+		}
 	}
 
 	private static AnchorModels.CompetitionPanel resolvePanel(AnchorModels.CompetitionPanel panel,

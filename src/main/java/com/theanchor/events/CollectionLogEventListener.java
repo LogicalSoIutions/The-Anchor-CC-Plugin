@@ -9,12 +9,15 @@ import com.theanchor.model.AnchorModels;
 import com.theanchor.service.LootEligibility;
 import com.theanchor.service.RulesService;
 import com.theanchor.service.BingoService;
+import com.theanchor.service.PartyTracker;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.ChatMessageType;
@@ -26,6 +29,7 @@ import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.gameval.VarClientID;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.util.Text;
 import net.runelite.http.api.item.ItemPrice;
 
@@ -38,13 +42,16 @@ public class CollectionLogEventListener
 	@Inject private ItemManager itemManager;
 	@Inject private RulesService rules;
 	@Inject private BingoService bingo;
+	@Inject private PartyTracker parties;
+	@Inject private ScheduledExecutorService executor;
+	@Inject private ClientThread clientThread;
 	private final AtomicBoolean popupStarted = new AtomicBoolean();
 
 	@Subscribe public void onChatMessage(ChatMessage event)
 	{
 		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) return;
 		Matcher matcher = PATTERN.matcher(Text.removeTags(event.getMessage())); if (!matcher.find()) return;
-		capture(normalizeItemName(matcher.group(1)), "chat");
+		scheduleCapture(normalizeItemName(matcher.group(1)), "chat");
 	}
 
 	@Subscribe public void onScriptPostFired(ScriptPostFired event)
@@ -56,7 +63,16 @@ public class CollectionLogEventListener
 		if (!"Collection log".equalsIgnoreCase(title) || body == null) return;
 		String item = normalizeItemName(body).replaceFirst("(?i)^New item:\\s*", "").trim();
 		if (item.isEmpty()) return;
-		capture(item, "popup");
+		scheduleCapture(item, "popup");
+	}
+
+	private void scheduleCapture(String itemName, String detectionSource)
+	{
+		if (itemName.isEmpty()) return;
+		// RuneLite can publish the collection-log message before its raid LootReceived event.
+		// Waiting one game tick lets that event establish the real encounter category and win
+		// loot deduplication while the collection-log notification is still visible.
+		executor.schedule(() -> clientThread.invokeLater(() -> capture(itemName, detectionSource)), 600, TimeUnit.MILLISECONDS);
 	}
 
 	private void capture(String itemName, String detectionSource)
@@ -67,13 +83,14 @@ public class CollectionLogEventListener
 		details.put("itemName", itemName);
 		details.put("detectionSource", detectionSource);
 		String dedupeKey = itemName.toLowerCase(java.util.Locale.ROOT);
+		AnchorModels.Source source = parties.resolveCollectionLogSource(collectionLogSource());
 		for (String eventType : eventTypesFor(items, rules.current()))
-			pipeline.capture(eventType, dedupeKey, collectionLogSource(), items, details, "loot".equals(eventType));
+			pipeline.capture(eventType, dedupeKey, source, items, details, "loot".equals(eventType));
 		if (bingo.shouldCaptureCollectionLog(items))
 		{
 			HashMap<String, Object> bingoDetails = new HashMap<>(details);
 			bingo.decorateDetails(bingoDetails);
-			pipeline.capture(bingo.eventType(), dedupeKey, collectionLogSource(), items, bingoDetails, true,
+			pipeline.capture(bingo.eventType(), dedupeKey, source, items, bingoDetails, true,
 				bingo.rulesVersion(), bingo.screenshotRequired(), bingo.finalizeSubmission());
 		}
 	}

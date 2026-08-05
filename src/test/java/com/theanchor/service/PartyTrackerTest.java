@@ -13,6 +13,19 @@ import static org.junit.Assert.*;
 
 public class PartyTrackerTest
 {
+	@Test public void recognizesRaidEntryAndFinalBossNames()
+	{
+		assertEquals("Theatre of Blood", PartyTracker.finalBossRaid("Verzik Vitur"));
+		assertEquals("Theatre of Blood", PartyTracker.finalBossRaid("<col=ff0000>Verzik Vitur</col>"));
+		assertEquals("Chambers of Xeric", PartyTracker.finalBossRaid("Great Olm"));
+		assertEquals("Tombs of Amascut", PartyTracker.finalBossRaid("Tumeken's Warden"));
+		assertNull(PartyTracker.finalBossRaid("Lady Verzik"));
+		assertEquals("Theatre of Blood", PartyTracker.firstBossRaid("The Maiden of Sugadinti"));
+		assertEquals("Tombs of Amascut", PartyTracker.firstBossRaid("Zebak"));
+		assertEquals("Tombs of Amascut", PartyTracker.firstBossRaid("Ba-Ba"));
+		assertNull(PartyTracker.firstBossRaid("Pestilent Bloat"));
+	}
+
 	@Test public void serializesOnlyClanNamesAndClanSplit()
 	{
 		AnchorModels.Party party = PartyTracker.snapshotFromData(3, Arrays.asList(
