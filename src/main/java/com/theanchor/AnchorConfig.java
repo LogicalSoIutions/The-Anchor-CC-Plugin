@@ -31,10 +31,6 @@ public interface AnchorConfig extends Config
 		section = AUTH, position = 0, secret = true)
 	default String authenticationCode() { return ""; }
 
-	@ConfigItem(keyName = "apiBaseUrl", name = "API base URL",
-		description = "The Anchor website origin", hidden = true, position = 1)
-	default String apiBaseUrl() { return "https://the-anchor.cc"; }
-
 	@ConfigItem(keyName = "includeSidebar", name = "Include sidebar",
 		description = "Include the RuneLite sidebar in evidence screenshots",
 		section = EVIDENCE, position = 0)

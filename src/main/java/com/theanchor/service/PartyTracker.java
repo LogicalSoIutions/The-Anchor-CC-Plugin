@@ -46,6 +46,7 @@ public class PartyTracker
 	private volatile long recentRaidSourceAt;
 	private String activeRaidSource;
 	private List<String> activeRaidNames = List.of();
+	private int activeRaidPartySize;
 	private AnchorModels.Party completedRaidParty;
 	private String completedRaidSource;
 	private long completedRaidAt;
@@ -103,14 +104,16 @@ public class PartyTracker
 		if (source == null) return;
 		List<String> finalNames = raidNames(source);
 		if (!finalNames.isEmpty()) updateActiveRaid(source, finalNames);
-		List<String> confirmedNames = finalNames.isEmpty() ? activeRaidNames : finalNames;
+		List<String> confirmedNames = sameRaid(source, activeRaidSource) ? activeRaidNames : finalNames;
 		if (confirmedNames.isEmpty()) confirmedNames = localNameList();
 		completedRaidSource = source;
-		completedRaidParty = buildParty(raidCount(source, confirmedNames.size()), confirmedNames,
+		completedRaidParty = buildParty(Math.max(activeRaidPartySize,
+			raidCount(source, confirmedNames.size())), confirmedNames,
 			"raid_party_final_boss", "high");
 		completedRaidAt = System.currentTimeMillis();
 		activeRaidSource = null;
 		activeRaidNames = List.of();
+		activeRaidPartySize = 0;
 		awaitingCompletedRosterClear = true;
 	}
 
@@ -135,6 +138,7 @@ public class PartyTracker
 		{
 			activeRaidSource = null;
 			activeRaidNames = List.of();
+			activeRaidPartySize = 0;
 			completedRaidParty = null;
 			completedRaidSource = null;
 			completedRaidAt = 0;
@@ -224,6 +228,17 @@ public class PartyTracker
 	private void updateActiveRaid(String source, List<String> names)
 	{
 		List<String> cleaned = dedupe(names);
+		if (sameRaid(source, activeRaidSource))
+		{
+			List<String> combined = new ArrayList<>(activeRaidNames);
+			combined.addAll(cleaned);
+			cleaned = dedupe(combined);
+		}
+		else
+		{
+			activeRaidPartySize = 0;
+		}
+		activeRaidPartySize = Math.max(activeRaidPartySize, raidCount(source, cleaned.size()));
 		if (source.equals(activeRaidSource) && cleaned.equals(activeRaidNames)) return;
 		activeRaidSource = source;
 		activeRaidNames = cleaned;
@@ -235,7 +250,8 @@ public class PartyTracker
 	{
 		if (sameRaid(sourceName, activeRaidSource))
 		{
-			return buildParty(activeRaidNames.size(), activeRaidNames, "raid_party_entry", "high");
+			return buildParty(Math.max(activeRaidPartySize, activeRaidNames.size()), activeRaidNames,
+				"raid_party_entry", "high");
 		}
 		if (completedRaidParty != null && completedRaidSource != null
 			&& sameRaid(sourceName, completedRaidSource)
@@ -368,14 +384,37 @@ public class PartyTracker
 	private List<String> chambersNames()
 	{
 		Widget list = client.getWidget(InterfaceID.RaidsSidepanel.LIST);
-		if (list == null || list.getChildren() == null) return List.of();
 		List<String> names = new ArrayList<>();
-		for (Widget child : list.getChildren())
+		collectChambersNames(list, names);
+		for (Player player : client.getPlayers())
 		{
-			String name = clean(child.getName());
-			if (!name.isEmpty()) names.add(name);
+			if (player != null && player.getName() != null) names.add(player.getName());
 		}
-		return names;
+		return dedupe(names);
+	}
+
+	static void collectChambersNames(Widget widget, List<String> names)
+	{
+		if (widget == null || names == null) return;
+		String name = clean(widget.getName());
+		String text = clean(widget.getText());
+		if (isPlayerName(text)) names.add(text);
+		else if (isPlayerName(name)) names.add(name);
+		Widget[] children = widget.getChildren();
+		if (children != null) for (Widget child : children) collectChambersNames(child, names);
+	}
+
+	private static boolean isPlayerName(String value)
+	{
+		if (value == null || value.isEmpty() || value.length() > 12) return false;
+		boolean letter = false;
+		for (int i = 0; i < value.length(); i++)
+		{
+			char c = value.charAt(i);
+			if (Character.isLetter(c)) letter = true;
+			else if (!Character.isDigit(c) && c != ' ' && c != '_') return false;
+		}
+		return letter;
 	}
 
 	private List<String> varcNames(int first, int count)

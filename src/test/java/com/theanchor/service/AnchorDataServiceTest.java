@@ -1,6 +1,5 @@
 package com.theanchor.service;
 
-import com.theanchor.AnchorConfig;
 import com.theanchor.api.AnchorApiClient;
 import com.theanchor.model.AnchorModels;
 import java.lang.reflect.Field;
@@ -16,36 +15,21 @@ import static org.mockito.Mockito.when;
 
 public class AnchorDataServiceTest
 {
-	@Test public void resolvesRelativeProfileImageUrl()
+	@Test public void usesFixedProfilePortraitEndpoint()
 	{
-		assertEquals("https://the-anchor.cc/images/player-picture.png",
-			AnchorDataService.profileImageUrl("https://the-anchor.cc", "Player", "images/player-picture.png"));
-	}
-
-	@Test public void buildsDefaultRsnPictureUrl()
-	{
-		assertEquals("https://the-anchor.cc/Player%20Name-picture.png",
-			AnchorDataService.profileImageUrl("https://the-anchor.cc", "Player Name", null));
-	}
-
-	@Test public void encodesSpacesInSuppliedProfileImageUrl()
-	{
-		assertEquals("https://the-anchor.cc/Player%20Name-picture.png",
-			AnchorDataService.profileImageUrl("https://the-anchor.cc", "ignored", "/Player Name-picture.png"));
+		assertEquals("https://the-anchor.cc/api/profile-portrait?name=Player%20Name",
+			AnchorDataService.profileImageUrl("Player Name"));
 	}
 
 	@Test public void refreshesProfileAndWeeklyCompetitions() throws Exception
 	{
 		AnchorDataService service = new AnchorDataService();
 		AnchorApiClient api = mock(AnchorApiClient.class);
-		AnchorConfig config = mock(AnchorConfig.class);
 		ImageCache images = mock(ImageCache.class);
 		RulesService rules = mock(RulesService.class);
 		inject(service, "api", api);
-		inject(service, "config", config);
 		inject(service, "images", images);
 		inject(service, "rules", rules);
-		when(config.apiBaseUrl()).thenReturn("https://the-anchor.cc/");
 		doAnswer(invocation ->
 		{
 			AnchorApiClient.ResultCallback<AnchorModels.CompetitionPanels> callback = invocation.getArgument(0);
@@ -67,10 +51,8 @@ public class AnchorDataServiceTest
 		verify(api).getProfile(eq("Zach"), any());
 		verify(api).getCompetitionPanels(any());
 		verify(api).getCompetitions(any());
-		verify(images).loadWebsiteImage(eq("botw-148345"), eq("https://the-anchor.cc/competition-artwork/botw-148345.png"),
-			eq("https://the-anchor.cc/botw.png"), any());
-		verify(images).loadWebsiteImage(eq("sotw-147161"), eq("https://the-anchor.cc/competition-artwork/sotw-147161.png"),
-			eq("https://the-anchor.cc/sotw.png"), any());
+		verify(images).loadWebsiteImage(eq("botw-148345"), eq("https://the-anchor.cc/botw.png"), any());
+		verify(images).loadWebsiteImage(eq("sotw-147161"), eq("https://the-anchor.cc/sotw.png"), any());
 		verify(rules).refresh(any());
 	}
 
@@ -96,7 +78,6 @@ public class AnchorDataServiceTest
 		AnchorModels.Competition competition = new AnchorModels.Competition();
 		competition.id = id;
 		competition.metric = metric;
-		competition.artworkUrl = "/competition-artwork/" + ("mad_angel".equals(metric) ? "botw" : "sotw") + "-" + id + ".png";
 		competition.startsAt = "2099-01-01T00:00:00Z";
 		competition.endsAt = "2099-01-08T00:00:00Z";
 		return competition;

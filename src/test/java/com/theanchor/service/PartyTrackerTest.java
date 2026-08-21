@@ -7,8 +7,16 @@ package com.theanchor.service;
 import com.google.gson.Gson;
 import com.theanchor.model.AnchorModels;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
+import net.runelite.api.Client;
+import net.runelite.api.NPC;
+import net.runelite.api.Player;
+import net.runelite.api.events.ActorDeath;
+import net.runelite.api.widgets.Widget;
 import org.junit.Test;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.junit.Assert.*;
 
 public class PartyTrackerTest
@@ -67,5 +75,52 @@ public class PartyTrackerTest
 		assertEquals(1, party.submittedClanMemberCount);
 		assertEquals(0, party.detectedNonClanMemberCount);
 		assertTrue(party.clanMemberNames.isEmpty());
+	}
+
+	@Test public void chambersRosterReadsDisplayedNamesAndIgnoresStats()
+	{
+		Widget list = mock(Widget.class);
+		Widget namedByAction = mock(Widget.class);
+		Widget namedByText = mock(Widget.class);
+		Widget combatLevel = mock(Widget.class);
+		when(list.getChildren()).thenReturn(new Widget[] {namedByAction, namedByText, combatLevel});
+		when(namedByAction.getName()).thenReturn("<col=ffffff>Anchor One</col>");
+		when(namedByText.getText()).thenReturn("Guest Two");
+		when(combatLevel.getText()).thenReturn("126");
+
+		List<String> names = new ArrayList<>();
+		PartyTracker.collectChambersNames(list, names);
+
+		assertEquals(List.of("Anchor One", "Guest Two"), names);
+	}
+
+	@Test public void chambersCompletionKeepsRosterCapturedBeforeFinalTick() throws Exception
+	{
+		PartyTracker tracker = new PartyTracker();
+		Client client = mock(Client.class);
+		Player local = mock(Player.class);
+		NPC olm = mock(NPC.class);
+		ActorDeath death = mock(ActorDeath.class);
+		when(local.getName()).thenReturn("Anchor One");
+		when(olm.getName()).thenReturn("Great Olm");
+		when(death.getActor()).thenReturn(olm);
+		when(client.getPlayers()).thenReturn(List.of(local));
+		setField(tracker, "client", client);
+		setField(tracker, "activeRaidSource", "Chambers of Xeric");
+		setField(tracker, "activeRaidNames", List.of("Anchor One", "Anchor Two", "Guest Three"));
+		setField(tracker, "activeRaidPartySize", 3);
+
+		tracker.onActorDeath(death);
+
+		AnchorModels.Party party = tracker.snapshot("Chambers of Xeric");
+		assertEquals(3, party.detectedPartySize);
+		assertEquals("raid_party_final_boss", party.method);
+	}
+
+	private static void setField(Object target, String name, Object value) throws Exception
+	{
+		java.lang.reflect.Field field = target.getClass().getDeclaredField(name);
+		field.setAccessible(true);
+		field.set(target, value);
 	}
 }

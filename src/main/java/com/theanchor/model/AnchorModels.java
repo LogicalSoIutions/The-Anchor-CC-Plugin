@@ -22,8 +22,6 @@ public final class AnchorModels
 		public String name;
 		public String discordId;
 		public String rosterRank;
-		@SerializedName(value = "profileImageUrl", alternate = {"profile_image_url"})
-		public String profileImageUrl;
 		public String status;
 	}
 
@@ -76,7 +74,6 @@ public final class AnchorModels
 		public String title;
 		public String metric;
 		public String metricLabel;
-		public String artworkUrl;
 		public String startsAt;
 		public String endsAt;
 		public int participantCount;
@@ -107,7 +104,6 @@ public final class AnchorModels
 		public long id;
 		public String title;
 		public String metric;
-		public String artworkUrl;
 		@SerializedName(value = "bossName", alternate = {"boss_name"})
 		public String bossName;
 		@SerializedName(value = "skillName", alternate = {"skill_name"})

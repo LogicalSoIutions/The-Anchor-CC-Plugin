@@ -32,7 +32,11 @@ public class ImageCache
 	private final ScheduledExecutorService executor;
 
 	@Inject
-	public ImageCache(OkHttpClient http, ScheduledExecutorService executor) { this.http = http; this.executor = executor; }
+	public ImageCache(OkHttpClient http, ScheduledExecutorService executor)
+	{
+		this.http = http.newBuilder().followRedirects(false).followSslRedirects(false).build();
+		this.executor = executor;
+	}
 
 	public void loadProfile(String rsn, String url, Consumer<BufferedImage> callback)
 	{

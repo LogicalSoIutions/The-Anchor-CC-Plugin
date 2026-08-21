@@ -29,19 +29,28 @@ import org.slf4j.LoggerFactory;
 @Singleton
 public class AnchorApiClient
 {
+	public static final String ANCHOR_ORIGIN = "https://the-anchor.cc";
 	private static final Logger log = LoggerFactory.getLogger(AnchorApiClient.class);
 	public static final String PLUGIN_VERSION = "1.0.0";
 	private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 	private final OkHttpClient http;
 	private final Gson gson;
 	private final AnchorConfig config;
+	private final String origin;
 
 	@Inject
 	public AnchorApiClient(OkHttpClient http, Gson gson, AnchorConfig config)
 	{
+		this(http, gson, config, ANCHOR_ORIGIN);
+	}
+
+	// Visible to package tests only; production requests always use ANCHOR_ORIGIN.
+	AnchorApiClient(OkHttpClient http, Gson gson, AnchorConfig config, String origin)
+	{
 		this.http = http.newBuilder().followRedirects(false).followSslRedirects(false).build();
 		this.gson = gson;
 		this.config = config;
+		this.origin = origin.replaceAll("/+$", "");
 	}
 
 	public interface ResultCallback<T> { void complete(ApiResult<T> result); }
@@ -131,7 +140,7 @@ public class AnchorApiClient
 
 	public void submit(String id, ResultCallback<Map> callback)
 	{
-		postJson("/api/runelite/submissions/" + encode(id) + "/submit", Map.of(), Map.class, callback);
+		postJson("/api/runelite/submissions/submit", Map.of("submissionId", id), Map.class, callback);
 	}
 
 	public void getSubmissions(String player, ResultCallback<AnchorModels.SubmissionSummary[]> callback)
@@ -217,8 +226,7 @@ public class AnchorApiClient
 
 	private String baseUrl()
 	{
-		String value = config.apiBaseUrl() == null ? "" : config.apiBaseUrl().trim();
-		return value.replaceAll("/+$", "");
+		return origin;
 	}
 
 	private static String encode(String value) { return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8).replace("+", "%20"); }

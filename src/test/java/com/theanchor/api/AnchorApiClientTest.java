@@ -27,9 +27,9 @@ public class AnchorApiClientTest
 			server.enqueue(new MockResponse().setResponseCode(409).setHeader("Content-Type", "application/json")
 				.setBody("{\"eventId\":\"event-1\",\"submissionId\":\"submission-1\",\"status\":\"draft\",\"validationMessages\":[{\"code\":\"required\",\"field\":\"source.name\",\"message\":\"source.name is required\",\"severity\":\"error\"}]}"));
 			server.start();
-			AnchorConfig config = mock(AnchorConfig.class); when(config.apiBaseUrl()).thenReturn(server.url("/").toString());
+			AnchorConfig config = mock(AnchorConfig.class);
 			when(config.authenticationCode()).thenReturn("CODE");
-			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config);
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config, server.url("/").toString());
 			Path screenshot = Files.createTempFile("anchor-api-validation", ".png");
 			ImageIO.write(new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB), "png", screenshot.toFile());
 			CountDownLatch latch = new CountDownLatch(1);
@@ -51,8 +51,8 @@ public class AnchorApiClientTest
 		try (MockWebServer server = new MockWebServer())
 		{
 			server.enqueue(new MockResponse().setResponseCode(200).setBody("{}")); server.start();
-			AnchorConfig config = mock(AnchorConfig.class); when(config.apiBaseUrl()).thenReturn(server.url("/").toString()); when(config.authenticationCode()).thenReturn("FOREVER-CODE");
-			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config); CountDownLatch latch = new CountDownLatch(1);
+			AnchorConfig config = mock(AnchorConfig.class); when(config.authenticationCode()).thenReturn("FOREVER-CODE");
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config, server.url("/").toString()); CountDownLatch latch = new CountDownLatch(1);
 			api.validateSession(result -> latch.countDown()); assertTrue(latch.await(3, TimeUnit.SECONDS));
 			RecordedRequest request = server.takeRequest(); assertEquals("Bearer FOREVER-CODE", request.getHeader("Authorization")); assertFalse(request.getBody().readUtf8().contains("FOREVER-CODE"));
 		}
@@ -63,8 +63,8 @@ public class AnchorApiClientTest
 		try (MockWebServer server = new MockWebServer())
 		{
 			server.enqueue(new MockResponse().setResponseCode(200).setBody("{}")); server.start();
-			AnchorConfig config = mock(AnchorConfig.class); when(config.apiBaseUrl()).thenReturn(server.url("/").toString()); when(config.authenticationCode()).thenReturn("SECRET");
-			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config); CountDownLatch latch = new CountDownLatch(1);
+			AnchorConfig config = mock(AnchorConfig.class); when(config.authenticationCode()).thenReturn("SECRET");
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config, server.url("/").toString()); CountDownLatch latch = new CountDownLatch(1);
 			api.getProfile("Player Name", result -> latch.countDown()); assertTrue(latch.await(3, TimeUnit.SECONDS));
 			RecordedRequest request = server.takeRequest(); assertNull(request.getHeader("Authorization")); assertTrue(request.getPath().contains("Player%20Name"));
 		}
@@ -76,8 +76,8 @@ public class AnchorApiClientTest
 		{
 			server.enqueue(new MockResponse().setResponseCode(200).setBody("{\"member\":{\"name\":\"LogicalHash\"},\"standings\":{\"botwRank\":{\"rank\":36,\"gained\":11,\"unit\":\"KC\",\"displayValue\":\"11 KC\",\"metric\":\"phosanis_nightmare\"},\"sotwRank\":{\"rank\":96,\"gained\":10461,\"unit\":\"XP\",\"displayValue\":\"10K XP\",\"metric\":\"crafting\"}}}"));
 			server.start();
-			AnchorConfig config = mock(AnchorConfig.class); when(config.apiBaseUrl()).thenReturn(server.url("/").toString());
-			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config); CountDownLatch latch = new CountDownLatch(1);
+			AnchorConfig config = mock(AnchorConfig.class);
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config, server.url("/").toString()); CountDownLatch latch = new CountDownLatch(1);
 			final com.theanchor.model.AnchorModels.Profile[] profile = new com.theanchor.model.AnchorModels.Profile[1];
 			api.getProfile("LogicalHash", result -> { profile[0] = result.value; latch.countDown(); });
 			assertTrue(latch.await(3, TimeUnit.SECONDS));
@@ -93,8 +93,8 @@ public class AnchorApiClientTest
 		try (MockWebServer server = new MockWebServer())
 		{
 			server.enqueue(new MockResponse().setResponseCode(200).setBody("{\"botw\":{\"metricLabel\":\"Phosani's Nightmare\",\"leaders\":[{\"rank\":1,\"displayName\":\"firstiron\",\"gained\":276,\"unit\":\"KC\",\"displayValue\":\"276 KC\"}]}}"));
-			server.start(); AnchorConfig config = mock(AnchorConfig.class); when(config.apiBaseUrl()).thenReturn(server.url("/").toString());
-			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config); CountDownLatch latch = new CountDownLatch(1);
+			server.start(); AnchorConfig config = mock(AnchorConfig.class);
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config, server.url("/").toString()); CountDownLatch latch = new CountDownLatch(1);
 			final com.theanchor.model.AnchorModels.CompetitionPanels[] panels = new com.theanchor.model.AnchorModels.CompetitionPanels[1];
 			api.getCompetitionPanels(result -> { panels[0] = result.value; latch.countDown(); }); assertTrue(latch.await(3, TimeUnit.SECONDS));
 			assertEquals("Phosani's Nightmare", panels[0].botw.metricLabel); assertEquals("276 KC", panels[0].botw.leaders.get(0).displayValue);
@@ -107,9 +107,9 @@ public class AnchorApiClientTest
 		try (MockWebServer server = new MockWebServer())
 		{
 			server.enqueue(new MockResponse().setResponseCode(200).setBody("{}")); server.start();
-			AnchorConfig config = mock(AnchorConfig.class); when(config.apiBaseUrl()).thenReturn(server.url("/").toString());
+			AnchorConfig config = mock(AnchorConfig.class);
 			when(config.authenticationCode()).thenReturn("CODE");
-			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config);
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config, server.url("/").toString());
 			AnchorModels.PlayerProgressRequest payload = new AnchorModels.PlayerProgressRequest();
 			payload.syncId = "progress-1"; payload.combatAchievements = new AnchorModels.CombatAchievementProgress();
 			payload.skills = new AnchorModels.SkillProgress();
@@ -132,9 +132,8 @@ public class AnchorApiClientTest
 					+ "\"teamsByDiscordId\":{\"284148696017403905\":{\"teamId\":\"team-1\",\"teamName\":\"Team 1\"}}}"));
 			server.start();
 			AnchorConfig config = mock(AnchorConfig.class);
-			when(config.apiBaseUrl()).thenReturn(server.url("/").toString());
 			when(config.authenticationCode()).thenReturn("CODE");
-			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config);
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config, server.url("/").toString());
 			CountDownLatch latch = new CountDownLatch(1);
 			final AnchorModels.BingoEvent[] event = new AnchorModels.BingoEvent[1];
 			api.getBingo(result -> { event[0] = result.value; latch.countDown(); });
@@ -160,9 +159,8 @@ public class AnchorApiClientTest
 				+ "\"evidence\":{\"eventType\":\"bingo\",\"screenshotRequired\":true,\"finalizeSubmission\":true}}"));
 			server.start();
 			AnchorConfig config = mock(AnchorConfig.class);
-			when(config.apiBaseUrl()).thenReturn(server.url("/").toString());
 			when(config.authenticationCode()).thenReturn("CODE");
-			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config);
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config, server.url("/").toString());
 			CountDownLatch latch = new CountDownLatch(1);
 			final AnchorModels.BingoRules[] rules = new AnchorModels.BingoRules[1];
 			api.getBingoRules(result -> { rules[0] = result.value; latch.countDown(); });
@@ -178,6 +176,28 @@ public class AnchorApiClientTest
 			RecordedRequest request = server.takeRequest();
 			assertEquals("/api/runelite/bingo/rules", request.getPath());
 			assertEquals("Bearer CODE", request.getHeader("Authorization"));
+		}
+	}
+
+	@Test public void finalizesSubmissionUsingFixedEndpoint() throws Exception
+	{
+		try (MockWebServer server = new MockWebServer())
+		{
+			server.enqueue(new MockResponse().setResponseCode(200).setBody("{}"));
+			server.start();
+			AnchorConfig config = mock(AnchorConfig.class);
+			when(config.authenticationCode()).thenReturn("CODE");
+			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config, server.url("/").toString());
+			CountDownLatch latch = new CountDownLatch(1);
+
+			api.submit("submission-123", result -> latch.countDown());
+
+			assertTrue(latch.await(3, TimeUnit.SECONDS));
+			RecordedRequest request = server.takeRequest();
+			assertEquals("POST", request.getMethod());
+			assertEquals("/api/runelite/submissions/submit", request.getPath());
+			assertEquals("Bearer CODE", request.getHeader("Authorization"));
+			assertEquals("{\"submissionId\":\"submission-123\"}", request.getBody().readUtf8());
 		}
 	}
 }

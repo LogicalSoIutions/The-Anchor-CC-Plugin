@@ -27,7 +27,6 @@ public class CompetitionServiceTest
 		competition.id = 123L;
 		competition.metric = "phosanis_nightmare";
 		competition.bossName = "Phosani's Nightmare";
-		competition.artworkUrl = "/competition-artwork/botw-123.png";
 		competition.topHistory = Arrays.asList(entry("Winner", 10, 100));
 		competition.status = "finished";
 		AnchorModels.CompetitionPanel panel = CompetitionService.convertToPanel(competition, "BOTW");
@@ -36,7 +35,6 @@ public class CompetitionServiceTest
 		assertEquals("Phosani's Nightmare", panel.metricLabel);
 		assertEquals("KC", panel.unit);
 		assertEquals("finished", panel.status);
-		assertEquals("/competition-artwork/botw-123.png", panel.artworkUrl);
 		assertEquals(1, panel.leaders.size());
 		assertEquals("Winner", panel.leaders.get(0).displayName);
 		assertEquals(100, panel.leaders.get(0).gained);

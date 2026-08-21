@@ -38,7 +38,6 @@ public final class CompetitionService
 		panel.kind = kind;
 		panel.title = comp.title;
 		panel.metric = comp.metric;
-		panel.artworkUrl = comp.artworkUrl;
 		boolean isBotw = "BOTW".equalsIgnoreCase(kind);
 		if (isBotw)
 		{
