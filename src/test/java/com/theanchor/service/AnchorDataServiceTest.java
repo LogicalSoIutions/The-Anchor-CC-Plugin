@@ -6,6 +6,8 @@ import java.lang.reflect.Field;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -64,6 +66,34 @@ public class AnchorDataServiceTest
 		assertEquals(2L, AnchorDataService.selectCompetition(pair).id);
 		pair.current = competition(3L, "agility");
 		assertEquals(3L, AnchorDataService.selectCompetition(pair).id);
+	}
+
+	@Test public void comparesRsnUsingJagexStyleSeparators()
+	{
+		assertTrue(AnchorDataService.samePlayer("Clan Mate", "clan_mate"));
+		assertFalse(AnchorDataService.samePlayer("Clan Mate", "Other Mate"));
+	}
+
+	@Test public void successfulRosterProfileActivatesFeaturesWithoutCanonicalMemberName() throws Exception
+	{
+		AnchorDataService service = new AnchorDataService();
+		AnchorApiClient api = mock(AnchorApiClient.class);
+		AnchorModels.Profile profile = new AnchorModels.Profile();
+		profile.member = new AnchorModels.Member();
+		inject(service, "api", api);
+		inject(service, "images", mock(ImageCache.class));
+		inject(service, "rules", mock(RulesService.class));
+		doAnswer(invocation ->
+		{
+			AnchorApiClient.ResultCallback<AnchorModels.Profile> callback = invocation.getArgument(1);
+			callback.complete(AnchorApiClient.ApiResult.ok(200, profile));
+			return null;
+		}).when(api).getProfile(eq("Zach"), any());
+
+		service.refresh("Zach");
+
+		assertTrue(service.isCurrentPlayerClanMember());
+		assertEquals(profile, service.profile());
 	}
 
 	private static AnchorModels.CompetitionPair pairWithUpcoming(long id, String metric)

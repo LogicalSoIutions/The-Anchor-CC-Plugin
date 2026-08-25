@@ -45,6 +45,7 @@ public class CollectionLogSyncOverlay extends OverlayPanel
 	{
 		if (client.getGameState() != GameState.LOGGED_IN
 			|| data.connection() != AnchorDataService.Connection.CONNECTED
+			|| !data.isCurrentPlayerClanMember()
 			|| promptState.hasSyncedForCurrentAccount())
 		{
 			return null;

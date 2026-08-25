@@ -24,6 +24,7 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.Insets;
+import java.awt.Image;
 import java.awt.RenderingHints;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
@@ -57,6 +58,7 @@ import javax.swing.JScrollPane;
 import javax.swing.Scrollable;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
+import javax.swing.JViewport;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -890,11 +892,14 @@ public class AnchorPanel extends PluginPanel {
 		return panel;
 	}
 
-	private static JScrollPane scroll(JPanel panel) {
+	static JScrollPane scroll(JPanel panel) {
 		ViewportWidthPanel viewport = new ViewportWidthPanel();
 		viewport.add(panel, BorderLayout.NORTH);
 		JScrollPane scroll = new JScrollPane(viewport);
 		scroll.setBorder(null);
+		scroll.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		scroll.getViewport().setOpaque(true);
 		scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 		scroll.getVerticalScrollBar().setUnitIncrement(16);
 		return scroll;
@@ -928,7 +933,7 @@ public class AnchorPanel extends PluginPanel {
 
 		@Override
 		public boolean getScrollableTracksViewportHeight() {
-			return false;
+			return getParent() instanceof JViewport && getPreferredSize().height < getParent().getHeight();
 		}
 	}
 
@@ -1377,6 +1382,8 @@ public class AnchorPanel extends PluginPanel {
 		private int aspectHeight = -1;
 
 		private AspectRatioIconLabel() {
+			setOpaque(true);
+			setBackground(ColorScheme.DARK_GRAY_COLOR);
 			addComponentListener(new ComponentAdapter() {
 				@Override
 				public void componentResized(ComponentEvent event) {
@@ -1412,9 +1419,19 @@ public class AnchorPanel extends PluginPanel {
 			if (icon == null || icon.getIconWidth() <= 0 || icon.getIconHeight() <= 0)
 				return;
 			Graphics2D g = (Graphics2D) graphics.create();
+			g.setColor(getBackground());
+			g.fillRect(0, 0, getWidth(), getHeight());
 			g.scale((double) getWidth() / icon.getIconWidth(), (double) getHeight() / icon.getIconHeight());
 			icon.paintIcon(this, g, 0, 0);
 			g.dispose();
+		}
+
+		@Override
+		public boolean imageUpdate(Image image, int flags, int x, int y, int width, int height) {
+			boolean updating = super.imageUpdate(image, flags, x, y, width, height);
+			if ((flags & (FRAMEBITS | ALLBITS | SOMEBITS)) != 0)
+				repaint();
+			return updating;
 		}
 	}
 

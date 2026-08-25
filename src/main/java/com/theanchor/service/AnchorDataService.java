@@ -36,6 +36,8 @@ public class AnchorDataService
 	private volatile long sotwImageCompetitionId = Long.MIN_VALUE;
 	private volatile Connection connection = Connection.NOT_CONFIGURED;
 	private volatile String message = "Log in to load your Anchor profile";
+	private volatile String requestedPlayerName;
+	private volatile boolean currentPlayerClanMember;
 
 	public void addListener(Runnable listener) { listeners.add(listener); }
 	public void removeListener(Runnable listener) { listeners.remove(listener); }
@@ -48,22 +50,60 @@ public class AnchorDataService
 	public BufferedImage unauthenticatedSotwImage() { return unauthenticatedSotwImage; }
 	public Connection connection() { return connection; }
 	public String message() { return message; }
+	public boolean isCurrentPlayerClanMember() { return currentPlayerClanMember; }
 
-	public void loggedOut() { profile = null; profileImage = null; message = "Log in to load your Anchor profile"; notifyListeners(); }
+	public void loggedOut()
+	{
+		requestedPlayerName = null;
+		currentPlayerClanMember = false;
+		profile = null;
+		profileImage = null;
+		message = "Log in to load your Anchor profile";
+		notifyListeners();
+	}
 
 	public void refresh(String playerName)
 	{
 		if (playerName == null || playerName.isBlank()) { loggedOut(); return; }
+		String requestedName = playerName.trim();
+		if (!samePlayer(requestedPlayerName, requestedName))
+		{
+			profile = null;
+			profileImage = null;
+			currentPlayerClanMember = false;
+		}
+		requestedPlayerName = requestedName;
 		message = "Loading " + playerName + "…"; notifyListeners();
 		api.getProfile(playerName, result ->
 		{
+			// An account switch can complete before the previous profile request. Never
+			// let that stale response activate the plugin for the newly logged-in RSN.
+			if (!samePlayer(requestedPlayerName, requestedName)) return;
 			if (result.isSuccessful() && result.value != null)
 			{
-				profile = result.value; message = "Profile loaded";
-				String url = profileImageUrl(playerName);
-				images.loadProfile(playerName, url, image -> { profileImage = image; notifyListeners(); });
+				profile = result.value;
+				// The profile endpoint is queried for requestedName and only returns a
+				// member profile for rostered players. Do not make feature activation
+				// depend on the optional/canonical member.name response field.
+				currentPlayerClanMember = profile.member != null;
+				message = currentPlayerClanMember ? "Profile loaded" : "Not found in The Anchor roster";
+				if (currentPlayerClanMember)
+				{
+					String url = profileImageUrl(playerName);
+					images.loadProfile(playerName, url, image ->
+					{
+						if (samePlayer(requestedPlayerName, requestedName)) profileImage = image;
+						notifyListeners();
+					});
+				}
+				else profile = null;
 			}
-			else { profile = null; message = result.statusCode == 404 ? "Not found in The Anchor roster" : result.error; }
+			else
+			{
+				profile = null;
+				currentPlayerClanMember = false;
+				message = result.statusCode == 404 ? "Not found in The Anchor roster" : result.error;
+			}
 			notifyListeners();
 		});
 		api.getCompetitionPanels(panelResult ->
@@ -125,6 +165,17 @@ public class AnchorDataService
 	{
 		loadCompetitionImage("botw", panels == null ? null : panels.botw);
 		loadCompetitionImage("sotw", panels == null ? null : panels.sotw);
+	}
+
+	static boolean samePlayer(String first, String second)
+	{
+		return normalizePlayerName(first).equals(normalizePlayerName(second));
+	}
+
+	private static String normalizePlayerName(String name)
+	{
+		return name == null ? "" : name.trim().toLowerCase(java.util.Locale.ROOT)
+			.replace(" ", "").replace("_", "").replace("-", "");
 	}
 
 	private void loadCompetitionImage(String kind, AnchorModels.CompetitionPanel panel)

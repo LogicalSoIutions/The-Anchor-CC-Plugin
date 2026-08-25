@@ -65,6 +65,7 @@ public class CollectionLogAutoSync
 	/** Re-arms capture or immediately syncs when the in-log Anchor button is clicked. */
 	void refreshRequested()
 	{
+		if (!data.isCurrentPlayerClanMember()) return;
 		if (uploadInProgress)
 		{
 			message("A sync is already in progress.");
@@ -88,7 +89,8 @@ public class CollectionLogAutoSync
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event)
 	{
-		if (event.getGroupId() != InterfaceID.COLLECTION || isPohLog()) return;
+		if (!data.isCurrentPlayerClanMember()
+			|| event.getGroupId() != InterfaceID.COLLECTION || isPohLog()) return;
 		long accountHash = client.getAccountHash();
 		if (accountHash == 0L || waitingForCapture || uploadInProgress || attemptedAccountHash == accountHash
 			|| collectionLogSync.hasSyncedCurrentAccount()) return;
@@ -148,6 +150,12 @@ public class CollectionLogAutoSync
 
 	private void startUpload()
 	{
+		if (!data.isCurrentPlayerClanMember())
+		{
+			waitingForCapture = false;
+			requestingCollectionData = false;
+			return;
+		}
 		if (data.connection() != AnchorDataService.Connection.CONNECTED)
 		{
 			log.debug("Automatic collection log sync deferred because The Anchor is not connected");

@@ -58,9 +58,11 @@ public class AnchorPluginLoginTest
 		plugin.onGameTick(mock(GameTick.class));
 
 		verify(data).refresh("Zach");
-		verify(pbs).onLogin();
-		verify(bingo).refresh();
-		verify(pipeline).refreshStatuses("Zach");
+		// Account-specific features wait for the profile lookup to confirm that
+		// this exact RSN is on the clan roster.
+		verify(pbs, never()).onLogin();
+		verify(bingo, never()).refresh();
+		verify(pipeline, never()).refreshStatuses("Zach");
 
 		plugin.onGameTick(mock(GameTick.class));
 		verify(data).refresh("Zach");

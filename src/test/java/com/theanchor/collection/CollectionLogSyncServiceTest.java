@@ -32,7 +32,7 @@ import org.mockito.ArgumentCaptor;
 
 public class CollectionLogSyncServiceTest
 {
-	@Test public void buildsDecodedItemMapAndCategoryCounts()
+	@Test public void buildsIdKeyedItemMapAndCategoryCounts()
 	{
 		Client client = mock(Client.class);
 		Player player = mock(Player.class);
@@ -60,11 +60,44 @@ public class CollectionLogSyncServiceTest
 
 		assertEquals(800, request.obtainedCount);
 		assertEquals(1700, request.totalCount);
+		assertEquals(2, request.schemaVersion);
 		assertEquals(5, request.categories.size());
 		assertEquals("collection_interface_items", request.source);
 		assertEquals(2, request.items.size());
-		assertEquals(Integer.valueOf(1), request.items.get("Dragon axe"));
-		assertEquals(Integer.valueOf(27), request.items.get("Toxic blowpipe"));
+		assertEquals(Integer.valueOf(1), request.items.get("11832"));
+		assertEquals(Integer.valueOf(27), request.items.get("12922"));
+		assertEquals("Dragon axe", request.itemNames.get("11832"));
+		assertEquals("Toxic blowpipe", request.itemNames.get("12922"));
+	}
+
+	@Test public void preservesDistinctItemsWithTheSameDisplayName()
+	{
+		Client client = mock(Client.class);
+		Player player = mock(Player.class);
+		ItemManager itemManager = mock(ItemManager.class);
+		ItemComposition firstHat = mock(ItemComposition.class);
+		ItemComposition secondHat = mock(ItemComposition.class);
+		when(firstHat.getName()).thenReturn("Chompy bird hat");
+		when(secondHat.getName()).thenReturn("Chompy bird hat");
+		when(itemManager.getItemComposition(2978)).thenReturn(firstHat);
+		when(itemManager.getItemComposition(2979)).thenReturn(secondHat);
+		when(player.getName()).thenReturn("Zach");
+		when(client.getLocalPlayer()).thenReturn(player);
+		when(client.getAccountHash()).thenReturn(456L);
+
+		CollectionLogSyncService service = new CollectionLogSyncService(client, mock(ConfigManager.class),
+			new Gson(), mock(AnchorApiClient.class), mock(CollectionLogPromptState.class), itemManager);
+		Map<Integer, Integer> captured = new LinkedHashMap<>();
+		captured.put(2978, 1);
+		captured.put(2979, 1);
+
+		AnchorModels.CollectionLogRequest request = service.collect(captured);
+
+		assertEquals(2, request.items.size());
+		assertEquals(Integer.valueOf(1), request.items.get("2978"));
+		assertEquals(Integer.valueOf(1), request.items.get("2979"));
+		assertEquals("Chompy bird hat", request.itemNames.get("2978"));
+		assertEquals("Chompy bird hat", request.itemNames.get("2979"));
 	}
 
 	@Test public void capturesScriptItemRowsBeforeSyncing()
@@ -98,7 +131,8 @@ public class CollectionLogSyncServiceTest
 		ArgumentCaptor<AnchorModels.CollectionLogRequest> payload = ArgumentCaptor.forClass(AnchorModels.CollectionLogRequest.class);
 		ArgumentCaptor<AnchorApiClient.ResultCallback> callback = ArgumentCaptor.forClass(AnchorApiClient.ResultCallback.class);
 		verify(api).syncCollectionLog(payload.capture(), callback.capture());
-		assertEquals(Integer.valueOf(4), payload.getValue().items.get("Dragon axe"));
+		assertEquals(Integer.valueOf(4), payload.getValue().items.get("11832"));
+		assertEquals("Dragon axe", payload.getValue().itemNames.get("11832"));
 		verify(promptState, never()).markSyncedForAccount("456");
 		callback.getValue().complete(AnchorApiClient.ApiResult.ok(200, Map.of()));
 		verify(promptState).markSyncedForAccount("456");

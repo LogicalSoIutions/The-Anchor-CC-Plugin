@@ -92,9 +92,10 @@ public class AnchorPlugin extends Plugin
 	private NavigationButton navigation;
 	private ScheduledFuture<?> refreshTask;
 	private List<Object> registered;
+	private volatile boolean featuresActive;
 	private String firstConnectionSyncedAccount;
 	private String activePlayerName;
-	private final Runnable connectionListener = this::syncFirstConnectionData;
+	private final Runnable connectionListener = () -> clientThread.invokeLater(this::updateFeatureActivation);
 
 	@Provides AnchorConfig provideConfig(ConfigManager manager) { return manager.getConfig(AnchorConfig.class); }
 
@@ -104,13 +105,10 @@ public class AnchorPlugin extends Plugin
 		overlayManager.add(collectionLogSyncOverlay);
 		overlayManager.add(eventAlertOverlay);
 		overlayManager.add(bingoEventOverlay);
-		collectionLogAutoSync.startUp();
-		collectionLogRefreshButton.startUp();
 		registered = Arrays.asList(parties, loot, collectionLog, collectionLogSync, pets, combatTiers, pbs);
-		for (Object listener : registered) eventBus.register(listener);
 		data.addListener(connectionListener);
 		data.validate();
-		evidence.pruneUploaded(config.retentionDays()); pipeline.retryAll();
+		evidence.pruneUploaded(config.retentionDays());
 		if (client.getGameState() == GameState.LOGGED_IN) onLoggedIn();
 		refreshTask = executor.scheduleAtFixedRate(this::runScheduledRefresh,
 			PROFILE_AND_COMPETITIONS_REFRESH_MINUTES,
@@ -122,9 +120,8 @@ public class AnchorPlugin extends Plugin
 	@Override protected void shutDown()
 	{
 		if (refreshTask != null) { refreshTask.cancel(false); refreshTask = null; }
-		if (registered != null) { for (Object listener : registered) eventBus.unregister(listener); registered = null; }
-		collectionLogRefreshButton.shutDown();
-		collectionLogAutoSync.shutDown();
+		deactivateFeatures();
+		registered = null;
 		data.removeListener(connectionListener);
 		if (navigation != null) { toolbar.removeNavigation(navigation); navigation = null; }
 		overlayManager.remove(collectionLogSyncOverlay);
@@ -148,6 +145,7 @@ public class AnchorPlugin extends Plugin
 		if (event.getGameState() == GameState.LOGGED_IN) tryOnLoggedIn();
 		else if (event.getGameState() == GameState.LOGIN_SCREEN)
 		{
+			deactivateFeatures();
 			activePlayerName = null;
 			firstConnectionSyncedAccount = null;
 			bingo.clear();
@@ -155,18 +153,22 @@ public class AnchorPlugin extends Plugin
 		}
 	}
 
-	@Subscribe public void onGameTick(GameTick event) { tryOnLoggedIn(); eventAlerts.onGameTick(); }
+	@Subscribe public void onGameTick(GameTick event)
+	{
+		tryOnLoggedIn();
+		if (featuresActive) eventAlerts.onGameTick();
+	}
 
 	@Subscribe public void onConfigChanged(ConfigChanged event)
 	{
 		if (!AnchorConfig.GROUP.equals(event.getGroup())) return;
 		switch (event.getKey())
 		{
-			case "authenticationCode": firstConnectionSyncedAccount = null; data.validate(); bingo.refresh(); pipeline.retryAll(); break;
+			case "authenticationCode": firstConnectionSyncedAccount = null; data.validate(); updateFeatureActivation(); break;
 			case "animatedBanner": panel.refreshBanner(); break;
 			case "eventAlerts": eventAlerts.resetStateForWorldHopOrLogin(); break;
 			case "refreshProfile": if (Boolean.parseBoolean(event.getNewValue())) { refreshCurrentPlayer(); resetAction(event.getKey()); } break;
-			case "retryOutbox": if (Boolean.parseBoolean(event.getNewValue())) { pipeline.retryAll(); resetAction(event.getKey()); } break;
+			case "retryOutbox": if (Boolean.parseBoolean(event.getNewValue())) { if (featuresActive) pipeline.retryAll(); resetAction(event.getKey()); } break;
 			case "clearImageCache": if (Boolean.parseBoolean(event.getNewValue())) { imageCache.clear(); refreshCurrentPlayer(); resetAction(event.getKey()); } break;
 			default: break;
 		}
@@ -181,14 +183,57 @@ public class AnchorPlugin extends Plugin
 		if (client.getGameState() != GameState.LOGGED_IN) return;
 		String name = currentName();
 		if (name == null || name.isBlank()) return;
-		if (name.equals(activePlayerName)) { syncFirstConnectionData(); return; }
+		if (name.equals(activePlayerName)) { updateFeatureActivation(); return; }
 		activePlayerName = name;
 		firstConnectionSyncedAccount = null;
-		data.refresh(name); bingo.refresh(); pbs.onLogin(); syncFirstConnectionData(); pipeline.retryAll(); pipeline.refreshStatuses(name);
+		data.refresh(name);
+		updateFeatureActivation();
 	}
+
+	private void updateFeatureActivation()
+	{
+		String name = currentName();
+		boolean shouldBeActive = client.getGameState() == GameState.LOGGED_IN
+			&& name != null && !name.isBlank()
+			&& data.connection() == AnchorDataService.Connection.CONNECTED
+			&& data.isCurrentPlayerClanMember();
+		if (!shouldBeActive)
+		{
+			deactivateFeatures();
+			return;
+		}
+		if (!featuresActive)
+		{
+			featuresActive = true;
+			for (Object listener : registered) eventBus.register(listener);
+			collectionLogAutoSync.startUp();
+			collectionLogRefreshButton.startUp();
+			bingo.refresh();
+			pbs.onLogin();
+			pipeline.retryAll();
+			pipeline.refreshStatuses(name);
+			log.info("The Anchor features activated for clan member {}", name);
+		}
+		syncFirstConnectionData();
+	}
+
+	private void deactivateFeatures()
+	{
+		if (!featuresActive) return;
+		featuresActive = false;
+		if (registered != null) for (Object listener : registered) eventBus.unregister(listener);
+		collectionLogRefreshButton.shutDown();
+		collectionLogAutoSync.shutDown();
+		firstConnectionSyncedAccount = null;
+		eventAlerts.resetStateForWorldHopOrLogin();
+		bingo.clear();
+		log.info("The Anchor features deactivated because the current RSN is not an authenticated clan member");
+	}
+
 	private void syncFirstConnectionData()
 	{
-		if (data.connection() != AnchorDataService.Connection.CONNECTED
+		if (!featuresActive || !data.isCurrentPlayerClanMember()
+			|| data.connection() != AnchorDataService.Connection.CONNECTED
 			|| client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null) return;
 		String account = Long.toString(client.getAccountHash());
 		if ("0".equals(account)) { log.debug("First connection sync is waiting for the account hash"); return; }
@@ -203,7 +248,8 @@ public class AnchorPlugin extends Plugin
 	{
 		String name = currentName();
 		if (name == null || name.isBlank()) return;
-		data.refresh(name); bingo.refresh(); pipeline.refreshStatuses(name);
+		data.refresh(name);
+		if (featuresActive) { bingo.refresh(); pipeline.refreshStatuses(name); }
 	}
 	private void runScheduledRefresh()
 	{

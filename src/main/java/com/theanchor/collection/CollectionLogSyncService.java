@@ -187,7 +187,9 @@ public class CollectionLogSyncService
 		{
 			for (Map.Entry<Integer, Integer> entry : captured.entrySet())
 			{
-				request.items.put(resolveItemName(entry.getKey()), entry.getValue());
+				String itemId = String.valueOf(entry.getKey());
+				request.items.put(itemId, entry.getValue());
+				request.itemNames.put(itemId, resolveItemName(entry.getKey()));
 			}
 		}
 		return request;

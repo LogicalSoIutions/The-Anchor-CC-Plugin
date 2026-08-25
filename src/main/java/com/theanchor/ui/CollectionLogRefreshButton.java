@@ -1,5 +1,6 @@
 package com.theanchor.ui;
 
+import com.theanchor.service.AnchorDataService;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -62,6 +63,7 @@ public class CollectionLogRefreshButton
 	private final ClientThread clientThread;
 	private final EventBus eventBus;
 	private final CollectionLogAutoSync autoSync;
+	private final AnchorDataService data;
 	private Widget buttonLayer;
 	private Widget[] buttonSprites;
 	private Widget buttonText;
@@ -69,12 +71,13 @@ public class CollectionLogRefreshButton
 
 	@Inject
 	public CollectionLogRefreshButton(Client client, ClientThread clientThread, EventBus eventBus,
-		CollectionLogAutoSync autoSync)
+		CollectionLogAutoSync autoSync, AnchorDataService data)
 	{
 		this.client = client;
 		this.clientThread = clientThread;
 		this.eventBus = eventBus;
 		this.autoSync = autoSync;
+		this.data = data;
 	}
 
 	public void startUp()
@@ -115,6 +118,11 @@ public class CollectionLogRefreshButton
 	@Subscribe
 	public void onBeforeRender(BeforeRender event)
 	{
+		if (!data.isCurrentPlayerClanMember())
+		{
+			hideButton();
+			return;
+		}
 		Widget searchButton = client.getWidget(InterfaceID.Collection.SEARCH_TOGGLE);
 		Widget parent = client.getWidget(InterfaceID.COLLECTION, 0);
 		if (searchButton == null || parent == null || isSearchOpen() || isPohLog())
@@ -136,6 +144,11 @@ public class CollectionLogRefreshButton
 
 	private void setupButton()
 	{
+		if (!data.isCurrentPlayerClanMember())
+		{
+			hideButton();
+			return;
+		}
 		Widget searchButton = client.getWidget(InterfaceID.Collection.SEARCH_TOGGLE);
 		if (searchButton == null || isSearchOpen() || isPohLog())
 		{

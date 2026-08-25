@@ -19,10 +19,12 @@ public class CollectionLogAutoSyncTest
 	{
 		Client client = mock(Client.class);
 		CollectionLogSyncService sync = mock(CollectionLogSyncService.class);
+		AnchorDataService data = mock(AnchorDataService.class);
 		when(client.getTickCount()).thenReturn(100);
 		when(sync.hasCapturedItems()).thenReturn(false);
+		when(data.isCurrentPlayerClanMember()).thenReturn(true);
 		CollectionLogAutoSync autoSync = new CollectionLogAutoSync(client, mock(ClientThread.class),
-			mock(EventBus.class), mock(AnchorDataService.class), sync);
+			mock(EventBus.class), data, sync);
 
 		autoSync.refreshRequested();
 
@@ -41,6 +43,7 @@ public class CollectionLogAutoSyncTest
 		when(client.getTickCount()).thenReturn(100);
 		when(sync.hasCapturedItems()).thenReturn(true);
 		when(data.connection()).thenReturn(AnchorDataService.Connection.CONNECTED);
+		when(data.isCurrentPlayerClanMember()).thenReturn(true);
 		when(sync.syncCapturedItems(org.mockito.ArgumentMatchers.any())).thenReturn(true);
 		CollectionLogAutoSync autoSync = new CollectionLogAutoSync(client, mock(ClientThread.class),
 			mock(EventBus.class), data, sync);
@@ -48,6 +51,20 @@ public class CollectionLogAutoSyncTest
 		autoSync.refreshRequested();
 
 		assertEquals(CollectionLogSyncOverlay.SYNCING_MESSAGE, autoSync.overlayMessage());
+	}
+
+	@Test
+	public void manualRefreshDoesNothingForNonClanAccount()
+	{
+		Client client = mock(Client.class);
+		CollectionLogSyncService sync = mock(CollectionLogSyncService.class);
+		CollectionLogAutoSync autoSync = new CollectionLogAutoSync(client, mock(ClientThread.class),
+			mock(EventBus.class), mock(AnchorDataService.class), sync);
+
+		autoSync.refreshRequested();
+
+		verify(client, org.mockito.Mockito.never()).runScript(org.mockito.ArgumentMatchers.anyInt());
+		verify(sync, org.mockito.Mockito.never()).syncCapturedItems(org.mockito.ArgumentMatchers.any());
 	}
 
 	@Test

@@ -319,7 +319,7 @@ public final class AnchorModels
 
 	public static final class CollectionLogRequest
 	{
-		public int schemaVersion = 1;
+		public int schemaVersion = 2;
 		public String syncId;
 		public PlayerIdentity player;
 		public String capturedAt;
@@ -327,8 +327,10 @@ public final class AnchorModels
 		public int totalCount;
 		public String source = "collection_interface_items";
 		public Map<String, CollectionCategoryProgress> categories = new LinkedHashMap<>();
-		/** OSRS item name to collection-log quantity, resolved via ItemManager from client script 4100. */
+		/** OSRS item ID string to collection-log quantity, captured directly from client script 4100. */
 		public Map<String, Integer> items = new LinkedHashMap<>();
+		/** Supplemental display names keyed by the same item ID strings as {@link #items}. */
+		public Map<String, String> itemNames = new LinkedHashMap<>();
 	}
 
 	public static final class CollectionCategoryProgress
