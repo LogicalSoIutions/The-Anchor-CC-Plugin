@@ -108,6 +108,8 @@ public class AnchorPanel extends PluginPanel {
 	private final JPanel extraSettings = verticalPanel();
 	private JButton extraSettingsButton;
 	private boolean extraSettingsVisible;
+	private boolean botwExpanded = true;
+	private boolean sotwExpanded = true;
 	private String activeTab = "Home";
 
 	@Inject
@@ -470,11 +472,11 @@ public class AnchorPanel extends PluginPanel {
 		boolean authRequired = requiresCompetitionAuthentication(data.connection());
 		home.add(competition("BOTW", competitions == null ? null : competitions.botw,
 				authRequired ? data.unauthenticatedBotwImage() : data.botwImage(),
-				standings == null ? null : standings.botwRank, playerName));
+				standings == null ? null : standings.botwRank, playerName, botwExpanded));
 		home.add(Box.createVerticalStrut(8));
 		home.add(competition("SOTW", competitions == null ? null : competitions.sotw,
 				authRequired ? data.unauthenticatedSotwImage() : data.sotwImage(),
-				standings == null ? null : standings.sotwRank, playerName));
+				standings == null ? null : standings.sotwRank, playerName, sotwExpanded));
 	}
 
 	static boolean requiresCompetitionAuthentication(AnchorDataService.Connection connection) {
@@ -483,8 +485,18 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private JPanel competition(String kind, AnchorModels.CompetitionPanel competition, BufferedImage image,
-			AnchorModels.CompetitionRank playerRank, String playerName) {
+			AnchorModels.CompetitionRank playerRank, String playerName, boolean expanded) {
 		JPanel card = card();
+		JButton toggle = actionButton((expanded ? "▾ " : "▸ ") + kind, false);
+		toggle.setHorizontalAlignment(SwingConstants.LEFT);
+		toggle.setToolTipText(expanded ? "Collapse " + kind : "Expand " + kind);
+		toggle.addActionListener(e -> toggleCompetition(kind));
+		toggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+		toggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, NAV_BUTTON_HEIGHT));
+		card.add(toggle);
+		if (!expanded)
+			return card;
+
 		int cardContentWidth = PANEL_WIDTH - 32;
 		BufferedImage scaledArtwork = scaleToWidth(image == null ? placeholderCompetition(kind) : image,
 				cardContentWidth);
@@ -546,6 +558,16 @@ public class AnchorPanel extends PluginPanel {
 			card.add(muted(finished ? "No completed competition history" : "No leaderboard history yet"));
 		}
 		return card;
+	}
+
+	private void toggleCompetition(String kind) {
+		if ("BOTW".equals(kind))
+			botwExpanded = !botwExpanded;
+		else
+			sotwExpanded = !sotwExpanded;
+		rebuildHome();
+		home.revalidate();
+		home.repaint();
 	}
 
 	private void rebuildSubmissions() {
