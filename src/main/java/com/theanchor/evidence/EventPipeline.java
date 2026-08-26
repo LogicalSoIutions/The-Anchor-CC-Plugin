@@ -177,14 +177,13 @@ public class EventPipeline
 		});
 	}
 
-	private static boolean shouldAutoSubmit(EvidenceStore.Record record)
+	private boolean shouldAutoSubmit(EvidenceStore.Record record)
 	{
-		if (record == null || record.metadata == null || record.metadata.details == null
-			|| !Boolean.TRUE.equals(record.metadata.details.get("autoSubmit"))) return false;
-		String type = record.metadata.eventType;
-		if ("personal_best".equals(type) || "collection_log".equals(type)) return true;
-		if (!"loot".equals(type) || record.metadata.party == null) return false;
-		return record.metadata.party.detectedPartySize == 1;
+		if (!config.autoSubmitEnabled() || record == null || record.metadata == null
+			|| record.metadata.context == null) return false;
+		Object finalizeSubmission = record.metadata.context.get("finalizeSubmission");
+		return Boolean.TRUE.equals(finalizeSubmission)
+			|| "true".equalsIgnoreCase(String.valueOf(finalizeSubmission));
 	}
 
 	private void autoSubmit(EvidenceStore.Record record)

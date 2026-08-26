@@ -701,8 +701,8 @@ public class AnchorPanel extends PluginPanel {
 		return group.get(0).status;
 	}
 
-	private static boolean canFinalize(List<EvidenceStore.Record> group) {
-		if (group == null) return true;
+	private boolean canFinalize(List<EvidenceStore.Record> group) {
+		if (group == null || !config.autoSubmitEnabled()) return true;
 		for (EvidenceStore.Record record : group) {
 			if (record == null || record.metadata == null || record.metadata.context == null) continue;
 			Object value = record.metadata.context.get("finalizeSubmission");

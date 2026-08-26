@@ -1,5 +1,7 @@
 package com.theanchor.service;
 
+
+import com.theanchor.AnchorConfig;
 import com.theanchor.api.AnchorApiClient;
 import com.theanchor.model.AnchorModels;
 import java.util.ArrayList;
@@ -16,6 +18,7 @@ public class BingoService
 {
 	private final AnchorApiClient api;
 	private final AnchorDataService data;
+	@Inject private AnchorConfig config;
 	private volatile AnchorModels.BingoEvent event;
 	private volatile AnchorModels.BingoRules rules;
 	private volatile Set<Integer> itemIds = java.util.Collections.emptySet();
@@ -152,7 +155,8 @@ public class BingoService
 
 	public boolean finalizeSubmission()
 	{
-		return rules == null || rules.evidence == null || rules.evidence.finalizeSubmission;
+		return (config == null || config.autoSubmitEnabled())
+			&& (rules == null || rules.evidence == null || rules.evidence.finalizeSubmission);
 	}
 
 	public String rulesVersion() { return rules == null ? null : rules.rulesVersion; }

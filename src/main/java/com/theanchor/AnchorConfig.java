@@ -46,6 +46,11 @@ public interface AnchorConfig extends Config
 		section = EVIDENCE, position = 2)
 	default int retentionDays() { return 30; }
 
+	@ConfigItem(keyName = "autoSubmitEnabled", name = "Auto-submit everything",
+		description = "Automatically submit all evidence types after upload",
+		section = EVIDENCE, position = 3)
+	default boolean autoSubmitEnabled() { return true; }
+
 	@ConfigItem(keyName = "animatedBanner", name = "Animated banner",
 		description = "Animate the side-panel banner; disable to show the static Anchor banner",
 		section = APPEARANCE, position = 0)
