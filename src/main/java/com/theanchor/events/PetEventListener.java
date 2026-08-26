@@ -29,16 +29,81 @@ import net.runelite.http.api.item.ItemPrice;
 public class PetEventListener
 {
 	private static final Pattern PATTERN = Pattern.compile("You (?:have a funny feeling like you(?:'|’)re being followed(?: by (.+?))?|have a funny feeling like you would have been followed|feel something weird sneaking into your backpack)[.!…]*$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern NAMED_FOLLOWED_PATTERN = Pattern.compile("^.+? has a funny feeling like .+?being followed:\\s*(.+?)(?:\\s+at\\s+.+?)?(?:\\s+from\\s+.+?)?[.!…]*$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern COLLECTION_LOG_PATTERN = Pattern.compile("New item added to your collection log:\\s*(.+)", Pattern.CASE_INSENSITIVE);
 	@Inject private EventPipeline pipeline;
 	@Inject private BingoService bingo;
 	@Inject private Client client;
 	@Inject private ItemManager itemManager;
+	private String pendingPetMessage;
+	private long pendingPetAt;
+	private String recentCollectionItem;
+	private long recentCollectionAt;
 
 	@Subscribe public void onChatMessage(ChatMessage event)
 	{
 		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) return;
-		String message = Text.removeTags(event.getMessage()); Matcher matcher = PATTERN.matcher(message); if (!matcher.find()) return;
-		String petName = matcher.group(1) == null ? "Unknown pet" : matcher.group(1).trim();
+		String message = Text.removeTags(event.getMessage());
+		Matcher collectionMatcher = COLLECTION_LOG_PATTERN.matcher(message);
+		if (collectionMatcher.find())
+		{
+			recentCollectionItem = collectionMatcher.group(1).trim();
+			recentCollectionAt = System.currentTimeMillis();
+			if (pendingPetMessage != null && recentCollectionAt - pendingPetAt <= 5000L)
+			{
+				capturePet(pendingPetMessage, recentCollectionItem);
+				pendingPetMessage = null;
+			}
+			return;
+		}
+
+		Matcher matcher = PATTERN.matcher(message);
+		boolean standardNotification = matcher.find();
+		String petName = standardNotification && matcher.group(1) != null ? matcher.group(1).trim() : namedFollowedPet(message);
+		if (petName != null && !petName.isBlank())
+		{
+			capturePet(message, petName);
+			return;
+		}
+		if (standardNotification || NAMED_FOLLOWED_PATTERN.matcher(message).find())
+		{
+			if (recentCollectionItem != null && System.currentTimeMillis() - recentCollectionAt <= 5000L)
+			{
+				capturePet(message, recentCollectionItem);
+				recentCollectionItem = null;
+			}
+			else
+			{
+				pendingPetMessage = message;
+				pendingPetAt = System.currentTimeMillis();
+			}
+		}
+	}
+
+	static String extractPetName(String message)
+	{
+		if (message == null) return null;
+		Matcher matcher = PATTERN.matcher(message);
+		if (matcher.find() && matcher.group(1) != null && !matcher.group(1).isBlank()) return matcher.group(1).trim();
+		matcher = NAMED_FOLLOWED_PATTERN.matcher(message);
+		if (matcher.find()) return matcher.group(1).trim();
+		matcher = COLLECTION_LOG_PATTERN.matcher(message);
+		if (matcher.find())
+		{
+			String itemName = matcher.group(1).trim();
+			if (PetItems.isPet(itemName)) return itemName;
+		}
+		return null;
+	}
+
+	private String namedFollowedPet(String message)
+	{
+		Matcher matcher = NAMED_FOLLOWED_PATTERN.matcher(message);
+		return matcher.find() ? matcher.group(1).trim() : null;
+	}
+
+	private void capturePet(String message, String petName)
+	{
 		HashMap<String, Object> details = new HashMap<>(); details.put("message", message); details.put("petName", petName);
 		details.put("obtained", !message.toLowerCase().contains("would have been followed"));
 		AnchorModels.Source source = currentBossSource();

@@ -25,6 +25,23 @@ public class LootEligibilityTest
 		assertTrue(LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
 	}
 
+	@Test public void capturesRepeatableUntradeableCollectionLogLoot()
+	{
+		AnchorModels.Item item = item("Elder venator fang", 200_000L);
+		item.tradeable = false;
+		assertTrue(LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
+	}
+
+	@Test public void capturesAllNoxiousHalberdPieces()
+	{
+		for (String name : new String[] {"Noxious point", "Noxious blade", "Noxious pommel"})
+		{
+			AnchorModels.Item item = item(name, 0);
+			item.tradeable = false;
+			assertTrue(name, LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
+		}
+	}
+
 	private static AnchorModels.Item item(String name, long value)
 	{
 		AnchorModels.Item item = new AnchorModels.Item();

@@ -26,4 +26,15 @@ public class BossRegistryTest
 		assertTrue(BossRegistry.isSupported("Corrupted Hunllef"));
 		assertTrue(BossRegistry.canBeMulti("Branda the Fire Queen"));
 	}
+
+	@Test public void listedSharedBossesAllowMultiPartyTracking()
+	{
+		for (String boss : new String[] {
+			"Nex", "General Graardor", "Commander Zilyana", "K'ril Tsutsaroth", "Kree'Arra",
+			"The Royal Titans", "Scurrius", "Yama", "The Nightmare", "The Hueycoatl"
+		})
+		{
+			assertTrue(boss, BossRegistry.canBeMulti(boss));
+		}
+	}
 }

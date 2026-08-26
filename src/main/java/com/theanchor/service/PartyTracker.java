@@ -57,13 +57,13 @@ public class PartyTracker
 	{
 		pollRaidRoster();
 		Player local = client.getLocalPlayer();
-		Actor interacting = local == null ? null : local.getInteracting();
-		if (interacting instanceof NPC)
+		NPC current = local != null && local.getInteracting() instanceof NPC
+			? (NPC) local.getInteracting() : interactingNpc(client.getPlayers());
+		if (current != null)
 		{
-			NPC current = (NPC) interacting;
 			if (target != current) { target = current; participants.clear(); }
 			idleTicks = 0;
-			participants.put(local, Boolean.TRUE);
+			if (local != null) participants.put(local, Boolean.TRUE);
 			for (Player player : client.getPlayers())
 				if (player != null && player.getInteracting() == target) participants.put(player, Boolean.TRUE);
 		}
@@ -144,6 +144,17 @@ public class PartyTracker
 			completedRaidAt = 0;
 			awaitingCompletedRosterClear = false;
 		}
+	}
+
+	private static NPC interactingNpc(List<Player> players)
+	{
+		if (players == null) return null;
+		for (Player player : players)
+		{
+			if (player != null && player.getInteracting() instanceof NPC)
+				return (NPC) player.getInteracting();
+		}
+		return null;
 	}
 
 	/** Remember named raid loot before event filtering/deduplication so collection-log events share its category. */

@@ -117,6 +117,28 @@ public class PartyTrackerTest
 		assertEquals("raid_party_final_boss", party.method);
 	}
 
+	@Test public void tracksVisiblePlayersWhenLocalPlayerIsNotTargeting() throws Exception
+	{
+		PartyTracker tracker = new PartyTracker();
+		Client client = mock(Client.class);
+		Player local = mock(Player.class);
+		Player teammate = mock(Player.class);
+		NPC nex = mock(NPC.class);
+		when(local.getName()).thenReturn("Anchor One");
+		when(teammate.getName()).thenReturn("Anchor Two");
+		when(local.getInteracting()).thenReturn(null);
+		when(teammate.getInteracting()).thenReturn(nex);
+		when(client.getLocalPlayer()).thenReturn(local);
+		when(client.getPlayers()).thenReturn(List.of(local, teammate));
+		setField(tracker, "client", client);
+
+		tracker.onGameTick(mock(net.runelite.api.events.GameTick.class));
+
+		AnchorModels.Party party = tracker.snapshot("Nex");
+		assertEquals(2, party.detectedPartySize);
+		assertEquals("boss_interaction", party.method);
+	}
+
 	private static void setField(Object target, String name, Object value) throws Exception
 	{
 		java.lang.reflect.Field field = target.getClass().getDeclaredField(name);

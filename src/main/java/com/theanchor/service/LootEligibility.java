@@ -17,7 +17,10 @@ public final class LootEligibility
 		"osmumten's fang", "elidinis' ward", "masori mask", "masori chaps", "masori body", "nightmare staff",
 		"eldritch orb", "harmonised orb", "volatile orb", "parasitic egg", "dizana's quiver",
 		"sunfire fanatic helm", "sunfire fanatic cuirass", "sunfire fanatic chausses", "echo crystal",
-		"tonalztics of ralos (uncharged)", "tanzanite mutagen", "magma mutagen", "infernal cape", "araxyte fang"
+		"tonalztics of ralos (uncharged)", "tanzanite mutagen", "magma mutagen", "infernal cape", "araxyte fang",
+		// Untradeable rare drops can have a low or zero GE price, but are still
+		// meaningful collection-log loot and should be captured on every drop.
+		"elder venator fang", "noxious point", "noxious blade", "noxious pommel"
 	));
 
 	private LootEligibility() {}
