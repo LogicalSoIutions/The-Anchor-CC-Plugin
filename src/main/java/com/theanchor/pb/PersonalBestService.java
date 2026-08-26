@@ -244,7 +244,7 @@ public class PersonalBestService
 		});
 		if (evidence)
 		{
-			AnchorModels.PbRecord record = records.get(0); Map<String, Object> details = new HashMap<>(); details.put("record", record); if (previous != null) details.put("previousDurationMillis", Math.round(previous * 1000));
+			AnchorModels.PbRecord record = records.get(0); Map<String, Object> details = new HashMap<>(); details.put("record", record); details.put("autoSubmit", true); if (previous != null) details.put("previousDurationMillis", Math.round(previous * 1000));
 			// Team size is already part of PbRecord when RuneLite provides it. PB evidence never needs loot-split metadata.
 			pipeline.capture("personal_best", record.activity + '|' + record.durationMillis, null, null, details, false);
 		}

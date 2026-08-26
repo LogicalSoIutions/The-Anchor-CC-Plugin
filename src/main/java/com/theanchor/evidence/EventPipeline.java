@@ -151,6 +151,7 @@ public class EventPipeline
 			? null : Path.of(record.screenshotPath);
 		api.uploadEvent(record.metadata, screenshot, record.format, result ->
 		{
+			boolean autoSubmit = shouldAutoSubmit(record);
 			if (result.isSuccessful() && result.value != null)
 			{
 				record.submissionId = result.value.submissionId; record.status = parseStatus(result.value.status);
@@ -171,7 +172,29 @@ public class EventPipeline
 				}
 			}
 			record.updatedAt = Instant.now().toString(); persist(record);
+			if (autoSubmit && record.status == AnchorModels.EventStatus.DRAFT)
+				autoSubmit(record);
 		});
+	}
+
+	private static boolean shouldAutoSubmit(EvidenceStore.Record record)
+	{
+		if (record == null || record.metadata == null || record.metadata.details == null
+			|| !Boolean.TRUE.equals(record.metadata.details.get("autoSubmit"))) return false;
+		String type = record.metadata.eventType;
+		if ("personal_best".equals(type) || "collection_log".equals(type)) return true;
+		if (!"loot".equals(type) || record.metadata.party == null) return false;
+		return record.metadata.party.detectedPartySize == 1;
+	}
+
+	private void autoSubmit(EvidenceStore.Record record)
+	{
+		AnchorModels.Party party = record.metadata.party;
+		int partySize = party == null ? 1 : party.submittedPartySize;
+		int clanMembers = party == null ? 0 : party.submittedClanMemberCount;
+		int nonClanMembers = party == null ? 0 : party.submittedNonClanMemberCount;
+		log.info("Automatically submitting event {} ({})", eventId(record), eventType(record));
+		updateAndSubmit(record, partySize, clanMembers, nonClanMembers, "");
 	}
 
 	public void updateAndSubmit(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers, String notes)

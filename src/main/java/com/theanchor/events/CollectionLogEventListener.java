@@ -82,6 +82,7 @@ public class CollectionLogEventListener
 		HashMap<String, Object> details = new HashMap<>();
 		details.put("itemName", itemName);
 		details.put("detectionSource", detectionSource);
+		details.put("autoSubmit", true);
 		String dedupeKey = itemName.toLowerCase(java.util.Locale.ROOT);
 		AnchorModels.Source source = parties.resolveCollectionLogSource(collectionLogSource());
 		for (String eventType : eventTypesFor(items, rules.current()))

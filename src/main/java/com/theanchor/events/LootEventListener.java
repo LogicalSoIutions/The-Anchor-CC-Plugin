@@ -79,6 +79,10 @@ public class LootEventListener
 			: first.name.trim().toLowerCase(java.util.Locale.ROOT);
 		Map<String, Object> details = new LinkedHashMap<>();
 		if (first.name != null) details.put("itemName", first.name);
+		// Only ordinary loot at the clan's value threshold is eligible for automatic
+		// submission; EventPipeline additionally requires the encounter to be solo.
+		if (items.stream().anyMatch(item -> LootEligibility.meetsMinimumValue(item, rules.current())))
+			details.put("autoSubmit", true);
 		pipeline.capture(type, key, source, items, details, true);
 	}
 
