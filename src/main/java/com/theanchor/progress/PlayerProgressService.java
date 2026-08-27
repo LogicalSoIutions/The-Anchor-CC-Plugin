@@ -8,7 +8,6 @@ package com.theanchor.progress;
 import com.theanchor.api.AnchorApiClient;
 import com.theanchor.model.AnchorModels;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -131,13 +130,11 @@ public class PlayerProgressService
 	private AnchorModels.QuestProgress collectQuests()
 	{
 		AnchorModels.QuestProgress result = new AnchorModels.QuestProgress();
-		int skipped = 0;
 		for (Quest quest : Quest.values())
 		{
 			String name = quest.getName();
 			if (name == null || name.isBlank())
 			{
-				skipped++;
 				log.error("Skipping quest with missing name: enum={}, id={}", quest.name(), quest.getId());
 				continue;
 			}
@@ -190,8 +187,6 @@ public class PlayerProgressService
 	private AnchorModels.CombatAchievementProgress collectCombatAchievements()
 	{
 		AnchorModels.CombatAchievementProgress result = new AnchorModels.CombatAchievementProgress();
-		int enumCount = 0;
-		int skippedTasks = 0;
 		for (String tier : TIER_ENUMS.values())
 		{
 			result.tierProgress.put(tier.toLowerCase(), new AnchorModels.TierProgress());
@@ -204,13 +199,11 @@ public class PlayerProgressService
 			{
 				continue;
 			}
-			enumCount += tierEnum.getIntVals().length;
 			for (int structId : tierEnum.getIntVals())
 			{
 				AnchorModels.CombatTask task = loadTask(structId, tierEntry.getValue());
 				if (task == null)
 				{
-					skippedTasks++;
 					continue;
 				}
 				result.tasks.add(task);

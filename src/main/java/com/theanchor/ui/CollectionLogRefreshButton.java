@@ -3,7 +3,6 @@ package com.theanchor.ui;
 import com.theanchor.service.AnchorDataService;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.Point;
 import net.runelite.api.events.ScriptPostFired;
@@ -21,7 +20,6 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.api.events.BeforeRender;
 
 /** Adds a small Anchor refresh button beside RuneProfile's collection-log button. */
-@Slf4j
 @Singleton
 public class CollectionLogRefreshButton
 {
@@ -67,7 +65,6 @@ public class CollectionLogRefreshButton
 	private Widget buttonLayer;
 	private Widget[] buttonSprites;
 	private Widget buttonText;
-	private boolean placementLogged;
 
 	@Inject
 	public CollectionLogRefreshButton(Client client, ClientThread clientThread, EventBus eventBus,
@@ -90,7 +87,6 @@ public class CollectionLogRefreshButton
 	{
 		eventBus.unregister(this);
 		clientThread.invokeLater(this::hideButton);
-		placementLogged = false;
 	}
 
 	@Subscribe
@@ -101,7 +97,6 @@ public class CollectionLogRefreshButton
 		buttonLayer = null;
 		buttonSprites = null;
 		buttonText = null;
-		placementLogged = false;
 		// RuneProfile applies its wider button after the collection widgets settle.
 		clientThread.invokeLater(() -> clientThread.invokeLater(this::setupButton));
 	}
@@ -252,13 +247,6 @@ public class CollectionLogRefreshButton
 		buttonLayer.setPos(x, y);
 		buttonLayer.revalidate();
 
-		if (!placementLogged)
-		{
-			placementLogged = true;
-			log.info("Anchor collection-log refresh button ready: root={}x{}, button=({}, {}) {}x{}",
-				parent.getWidth(), parent.getHeight(), buttonLayer.getRelativeX(), buttonLayer.getRelativeY(),
-				buttonLayer.getWidth(), buttonLayer.getHeight());
-		}
 		return true;
 	}
 
@@ -269,7 +257,6 @@ public class CollectionLogRefreshButton
 
 	private void refreshCollectionLog()
 	{
-		log.info("Refresh for The Anchor clicked");
 		if (isSearchOpen() || isPohLog()) return;
 		autoSync.refreshRequested();
 	}

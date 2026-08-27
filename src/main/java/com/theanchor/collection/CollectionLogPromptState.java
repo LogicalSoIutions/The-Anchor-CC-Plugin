@@ -3,11 +3,9 @@ package com.theanchor.collection;
 import com.theanchor.AnchorConfig;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.client.config.ConfigManager;
 
-@Slf4j
 @Singleton
 public class CollectionLogPromptState
 {
@@ -38,13 +36,11 @@ public class CollectionLogPromptState
 		String key = accountKey(accountHash);
 		if (key == null)
 		{
-			log.debug("Collection log sync completed before an account hash was available");
 			return false;
 		}
 		if (!Boolean.parseBoolean(configManager.getConfiguration(AnchorConfig.GROUP, key)))
 		{
 			configManager.setConfiguration(AnchorConfig.GROUP, key, true);
-			log.info("Collection log sync prompt completed for account hash ending {}", accountHashSuffix(accountHash));
 		}
 		return true;
 	}
@@ -59,8 +55,4 @@ public class CollectionLogPromptState
 		return accountHash == null || accountHash.isBlank() || "0".equals(accountHash) ? null : KEY_PREFIX + accountHash;
 	}
 
-	private static String accountHashSuffix(String accountHash)
-	{
-		return accountHash.length() <= 4 ? accountHash : accountHash.substring(accountHash.length() - 4);
-	}
 }

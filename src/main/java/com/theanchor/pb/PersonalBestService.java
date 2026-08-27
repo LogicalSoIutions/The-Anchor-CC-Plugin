@@ -116,7 +116,7 @@ public class PersonalBestService
 				if (record.durationMillis != null)
 				{
 					Double seconds = record.durationMillis / 1000.0;
-					Double previous = known.put(key, seconds);
+					known.put(key, seconds);
 				}
 			}
 			String fingerprint = fingerprint(records);
