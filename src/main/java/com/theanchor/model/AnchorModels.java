@@ -274,7 +274,46 @@ public final class AnchorModels
 		public PlayerIdentity player;
 		public String capturedAt;
 		public CombatAchievementProgress combatAchievements;
+		public QuestProgress quests;
+		public AchievementDiaryProgress achievementDiaries;
 		public SkillProgress skills;
+	}
+
+	public static final class QuestProgress
+	{
+		public int completedCount;
+		public int totalCount;
+		public List<QuestSnapshot> quests = new ArrayList<>();
+	}
+
+	public static final class QuestSnapshot
+	{
+		public int id;
+		public String name;
+		public String state;
+		public boolean completed;
+	}
+
+	public static final class AchievementDiaryProgress
+	{
+		public int completedTasks;
+		public int totalTasks;
+		public List<AchievementDiaryArea> areas = new ArrayList<>();
+	}
+
+	public static final class AchievementDiaryArea
+	{
+		public int id;
+		public String name;
+		public List<AchievementDiaryTier> tiers = new ArrayList<>();
+	}
+
+	public static final class AchievementDiaryTier
+	{
+		public String name;
+		public int completedCount;
+		public int totalCount;
+		public boolean completed;
 	}
 
 	public static final class CombatAchievementProgress

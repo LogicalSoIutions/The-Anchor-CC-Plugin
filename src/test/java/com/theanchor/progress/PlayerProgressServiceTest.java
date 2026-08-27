@@ -4,6 +4,7 @@
  */
 package com.theanchor.progress;
 
+import com.google.gson.Gson;
 import com.theanchor.api.AnchorApiClient;
 import com.theanchor.model.AnchorModels;
 import net.runelite.api.Client;
@@ -15,6 +16,7 @@ import net.runelite.api.gameval.VarbitID;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -22,6 +24,32 @@ import static org.mockito.Mockito.when;
 
 public class PlayerProgressServiceTest
 {
+	@Test public void decodesTasksInLatestCombatAchievementCompletionBitmap()
+	{
+		Client client = mock(Client.class);
+		Player player = mock(Player.class);
+		when(player.getName()).thenReturn("Zach");
+		when(client.getLocalPlayer()).thenReturn(player);
+
+		EnumComposition elite = mock(EnumComposition.class);
+		when(elite.getIntVals()).thenReturn(new int[] {9671});
+		when(client.getEnum(3984)).thenReturn(elite);
+		StructComposition taskStruct = mock(StructComposition.class);
+		when(taskStruct.getIntValue(1306)).thenReturn(671);
+		when(taskStruct.getStringValue(1308)).thenReturn("New elite task");
+		when(client.getStructComposition(9671)).thenReturn(taskStruct);
+		when(client.getVarpValue(5673)).thenReturn(1 << 31);
+		when(client.getIntStack()).thenReturn(new int[12]);
+		when(client.getVarbitValue(VarbitID.CA_TOTAL_TASKS_COMPLETED_ELITE)).thenReturn(1);
+
+		PlayerProgressService service = new PlayerProgressService(client, mock(AnchorApiClient.class));
+		AnchorModels.PlayerProgressRequest request = service.collect();
+
+		assertEquals(671, request.combatAchievements.tasks.get(0).id);
+		assertTrue(request.combatAchievements.tasks.get(0).completed);
+		assertEquals(1, request.combatAchievements.completedTasks);
+	}
+
 	@Test public void collectsFullCombatTaskAndSkillSnapshot()
 	{
 		Client client = mock(Client.class);
@@ -38,7 +66,9 @@ public class PlayerProgressServiceTest
 		when(taskStruct.getStringValue(1308)).thenReturn("Sample task");
 		when(client.getStructComposition(9001)).thenReturn(taskStruct);
 		when(client.getVarpValue(3116)).thenReturn(1);
+		when(client.getIntStack()).thenReturn(new int[12]);
 		when(client.getVarbitValue(VarbitID.CA_POINTS)).thenReturn(41);
+		when(client.getVarbitValue(VarbitID.CA_TOTAL_TASKS_COMPLETED_EASY)).thenReturn(1);
 		when(client.getVarbitValue(VarbitID.CA_THRESHOLD_EASY)).thenReturn(41);
 		when(client.getRealSkillLevel(any(Skill.class))).thenReturn(99);
 		when(client.getSkillExperience(any(Skill.class))).thenReturn(13_034_431);
@@ -54,6 +84,20 @@ public class PlayerProgressServiceTest
 		assertTrue(request.combatAchievements.tasks.get(0).completed);
 		assertEquals("Easy", request.combatAchievements.currentTier);
 		assertEquals(1, request.combatAchievements.tierProgress.get("easy").obtained);
+		assertEquals(12, request.achievementDiaries.areas.size());
+		assertEquals(491, request.achievementDiaries.totalTasks);
+		assertEquals(10, request.achievementDiaries.areas.get(0).tiers.get(0).totalCount);
+		assertEquals(5, request.achievementDiaries.areas.get(0).tiers.get(3).totalCount);
+		assertEquals(request.quests.totalCount, request.quests.quests.size());
+		assertTrue(request.quests.totalCount > 0);
+		for (AnchorModels.QuestSnapshot quest : request.quests.quests)
+		{
+			assertFalse(quest.name == null || quest.name.trim().isEmpty());
+			assertFalse(quest.state == null || quest.state.trim().isEmpty());
+		}
+		String payload = new Gson().toJson(request);
+		assertFalse("progress payload contains a null name: " + payload,
+			payload.contains("\"name\":null"));
 		assertEquals(Skill.values().length, request.skills.skills.size());
 		assertEquals(99 * Skill.values().length, request.skills.totalLevel);
 		assertEquals(13_034_431L * Skill.values().length, request.skills.totalExperience);

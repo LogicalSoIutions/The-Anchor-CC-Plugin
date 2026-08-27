@@ -111,7 +111,7 @@ public class AnchorApiClient
 		}
 		catch (IOException e)
 		{
-			log.warn("Could not read evidence screenshot {}", screenshot, e);
+			log.error("Could not read evidence screenshot {}", screenshot, e);
 			callback.complete(ApiResult.error(0, "Could not read evidence screenshot"));
 		}
 	}
@@ -160,7 +160,15 @@ public class AnchorApiClient
 
 	private <T> void postJsonWithMethod(String path, Object value, String method, Class<T> type, ResultCallback<T> callback)
 	{
-		RequestBody body = RequestBody.create(JSON, gson.toJson(value));
+		String json = gson.toJson(value);
+		if ("/api/runelite/player-progress".equals(path))
+		{
+			if (json.contains("\"name\":null") || json.contains("\"name\":\"\""))
+			{
+				log.error("Player-progress payload contains a null or blank name before POST");
+			}
+		}
+		RequestBody body = RequestBody.create(JSON, json);
 		execute(newRequest(path, true).method(method, body).build(), type, callback);
 	}
 
@@ -179,12 +187,11 @@ public class AnchorApiClient
 
 	private <T> void execute(Request request, Class<T> type, ResultCallback<T> callback)
 	{
-		log.debug("Anchor API request: {} {}", request.method(), request.url().encodedPath());
 		http.newCall(request).enqueue(new Callback()
 		{
 			@Override public void onFailure(Call call, IOException e)
 			{
-				log.warn("Anchor API request failed: {} {}", request.method(), request.url().encodedPath(), e);
+				log.error("Anchor API request failed: {} {}", request.method(), request.url().encodedPath(), e);
 				callback.complete(ApiResult.error(0, "Network unavailable"));
 			}
 			@Override public void onResponse(Call call, Response response)
@@ -195,19 +202,17 @@ public class AnchorApiClient
 					body = response.body() == null ? "" : response.body().string();
 					if (!response.isSuccessful() && response.code() != 409)
 					{
-						log.warn("Anchor API returned HTTP {} for {} {}: {}", response.code(), request.method(),
+						log.error("Anchor API returned HTTP {} for {} {}: {}", response.code(), request.method(),
 							request.url().encodedPath(), responsePreview(body));
 						callback.complete(ApiResult.error(response.code(), safeError(response.code())));
 						return;
 					}
 					T parsed = body.isBlank() ? null : gson.fromJson(body, type);
-					log.debug("Anchor API request succeeded: {} {} HTTP {}", request.method(),
-						request.url().encodedPath(), response.code());
 					callback.complete(ApiResult.ok(response.code() == 409 ? 200 : response.code(), parsed));
 				}
 				catch (IOException | RuntimeException e)
 				{
-					log.warn("Invalid Anchor API response for {} {} (HTTP {}, content-type {}): {}", request.method(),
+					log.error("Invalid Anchor API response for {} {} (HTTP {}, content-type {}): {}", request.method(),
 						request.url().encodedPath(), response.code(), response.header("Content-Type"), responsePreview(body), e);
 					callback.complete(ApiResult.error(0, "Invalid server response"));
 				}

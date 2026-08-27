@@ -80,7 +80,7 @@ public class EventAlertService
 		catch (RuntimeException e)
 		{
 			requestInFlight.set(false);
-			log.debug("Unable to schedule The Anchor event-alert request", e);
+			log.error("Unable to schedule The Anchor event-alert request", e);
 		}
 	}
 
@@ -109,7 +109,6 @@ public class EventAlertService
 	private void requestAlert(int requestGeneration)
 	{
 		String url = EVENT_ALERTS_URL + "?t=" + System.currentTimeMillis();
-		log.info("[DEBUG-NOTIS] Fetching event alert notification from URL: {}", url);
 		Request request = new Request.Builder()
 			.url(url)
 			.header("Cache-Control", "no-cache")
@@ -119,20 +118,16 @@ public class EventAlertService
 			int code = response.code();
 			if (!response.isSuccessful() || response.body() == null)
 			{
-				log.info("[DEBUG-NOTIS] Event alert HTTP request failed with code: {} (body null: {})", code, response.body() == null);
+				log.error("Event alert HTTP request failed with code: {} (body null: {})", code, response.body() == null);
 				return;
 			}
 			String rawBody = response.body().string();
-			log.info("[DEBUG-NOTIS] Received notification response from server (HTTP {}): {}", code, rawBody);
 			EventAlert alert = gson.fromJson(rawBody, EventAlert.class);
-			log.info("[DEBUG-NOTIS] Parsed event alert: message='{}', time='{}'",
-				alert != null ? alert.getMessage() : null,
-				alert != null ? alert.getTime() : null);
 			acceptAlert(alert, requestGeneration);
 		}
 		catch (IOException | RuntimeException e)
 		{
-			log.info("[DEBUG-NOTIS] Unable to fetch The Anchor event alert", e);
+			log.error("Unable to fetch The Anchor event alert", e);
 		}
 		finally
 		{
@@ -155,12 +150,10 @@ public class EventAlertService
 		{
 			if (requestGeneration != generation)
 			{
-				log.info("[DEBUG-NOTIS] Ignored alert due to generation mismatch (requestGen={}, currentGen={})", requestGeneration, generation);
 				return;
 			}
 			if (message == null || message.trim().isEmpty())
 			{
-				log.info("[DEBUG-NOTIS] Alert message is empty; initialCheckComplete set to true");
 				initialCheckComplete = true;
 				return;
 			}
@@ -169,20 +162,14 @@ public class EventAlertService
 			{
 				baselineMessage = message;
 				initialCheckComplete = true;
-				log.info("[DEBUG-NOTIS] Initial baseline message set to: '{}'", baselineMessage);
 				return;
 			}
 			if (!Objects.equals(message, baselineMessage) && sentMessages.add(message))
 			{
 				shouldSend = true;
 			}
-			else
-			{
-				log.info("[DEBUG-NOTIS] Alert skipped (equals baseline or already sent). Message: '{}', baseline: '{}'", message, baselineMessage);
-			}
 		}
 		if (!shouldSend) return;
-		log.info("[DEBUG-NOTIS] Triggering new event notification: '{}'", message);
 		sendChatMessage(message);
 		overlayMessage = message;
 		overlayExpiresAt = System.currentTimeMillis() + Math.max(1, config.eventAlertDuration()) * 1000L;

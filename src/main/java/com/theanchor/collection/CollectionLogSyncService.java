@@ -73,8 +73,6 @@ public class CollectionLogSyncService
 		if (itemId <= 0 || quantity <= 0) return;
 		synchronized (items) { items.put(itemId, quantity); }
 		lastItemScriptTick = client.getTickCount();
-		if (items.size() == 1 || items.size() % 100 == 0)
-			log.debug("Collection log item capture progress: decodedItems={}, lastItemId={}", items.size(), itemId);
 	}
 
 	@Subscribe
@@ -99,27 +97,22 @@ public class CollectionLogSyncService
 		if (client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null
 			|| client.getAccountHash() == 0L)
 		{
-			log.debug("Collection log sync skipped because account state was not ready");
 			return false;
 		}
 		Map<Integer, Integer> captured;
 		synchronized (items) { captured = new LinkedHashMap<>(items); }
 		if (lastItemScriptTick != -1 && lastItemScriptTick + 2 >= client.getTickCount())
 		{
-			log.debug("Collection log sync requested while item rows were still settling: lastRowTick={}, currentTick={}",
-				lastItemScriptTick, client.getTickCount());
 			return false;
 		}
 		if (captured.isEmpty())
 		{
-			log.warn("Collection log sync requested before script {} produced any item rows; lastRowTick={}, currentTick={}",
+			log.error("Collection log sync requested before script {} produced any item rows; lastRowTick={}, currentTick={}",
 				COLLECTION_ITEM_SCRIPT, lastItemScriptTick, client.getTickCount());
 			return false;
 		}
 		AnchorModels.CollectionLogRequest request = collect(captured);
 		configManager.setConfiguration(AnchorConfig.GROUP, pendingKey(), gson.toJson(request));
-		log.info("Collection log sync starting: player={}, obtained={}/{}, decodedItems={}, lastRowTick={}",
-			request.player.name, request.obtainedCount, request.totalCount, request.items.size(), lastItemScriptTick);
 		send(request, completion);
 		return true;
 	}
@@ -155,16 +148,14 @@ public class CollectionLogSyncService
 			if (request == null || request.syncId == null || request.items == null || request.items.isEmpty())
 			{
 				configManager.unsetConfiguration(AnchorConfig.GROUP, key);
-				log.info("Discarded legacy packed collection snapshot; reopen the collection log to create a decoded snapshot");
 				return;
 			}
-			log.info("Retrying pending collection log sync: player={}, syncId={}", request.player.name, request.syncId);
 			send(request, success -> { });
 		}
 		catch (RuntimeException e)
 		{
 			configManager.unsetConfiguration(AnchorConfig.GROUP, key);
-			log.warn("Discarded unreadable pending collection log snapshot", e);
+			log.error("Discarded unreadable pending collection log snapshot", e);
 		}
 	}
 
@@ -209,7 +200,7 @@ public class CollectionLogSyncService
 			}
 			catch (Exception e)
 			{
-				log.debug("Failed to resolve item name for item ID {}", itemId, e);
+				log.error("Failed to resolve item name for item ID {}", itemId, e);
 			}
 		}
 		return String.valueOf(itemId);
@@ -225,7 +216,6 @@ public class CollectionLogSyncService
 
 	private void send(AnchorModels.CollectionLogRequest request, Consumer<Boolean> completion)
 	{
-		log.debug("Anchor collection log request payload: {}", gson.toJson(request));
 		api.syncCollectionLog(request, result ->
 		{
 			if (result.isSuccessful())
@@ -233,12 +223,10 @@ public class CollectionLogSyncService
 				lastSuccessfulAccountHash = request.player.accountHash;
 				promptState.markSyncedForAccount(request.player.accountHash);
 				configManager.unsetConfiguration(AnchorConfig.GROUP, PENDING_PREFIX + request.player.accountHash);
-				log.info("Collection log sync completed: player={}, decodedItems={}, syncId={}",
-					request.player.name, request.items.size(), request.syncId);
 			}
 			else
 			{
-				log.warn("Collection log sync failed and remains queued: player={}, syncId={}, error={}",
+				log.error("Collection log sync failed and remains queued: player={}, syncId={}, error={}",
 					request.player.name, request.syncId, result.error);
 			}
 			completion.accept(result.isSuccessful());

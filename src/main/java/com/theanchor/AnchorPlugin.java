@@ -114,7 +114,6 @@ public class AnchorPlugin extends Plugin
 			PROFILE_AND_COMPETITIONS_REFRESH_MINUTES,
 			PROFILE_AND_COMPETITIONS_REFRESH_MINUTES,
 			TimeUnit.MINUTES);
-		log.info("The Anchor plugin started");
 	}
 
 	@Override protected void shutDown()
@@ -131,7 +130,7 @@ public class AnchorPlugin extends Plugin
 		bingo.clear();
 		activePlayerName = null;
 		firstConnectionSyncedAccount = null;
-		data.loggedOut(); log.info("The Anchor plugin stopped");
+		data.loggedOut();
 	}
 
 	@Subscribe public void onGameStateChanged(GameStateChanged event)
@@ -212,7 +211,6 @@ public class AnchorPlugin extends Plugin
 			pbs.onLogin();
 			pipeline.retryAll();
 			pipeline.refreshStatuses(name);
-			log.info("The Anchor features activated for clan member {}", name);
 		}
 		syncFirstConnectionData();
 	}
@@ -227,7 +225,6 @@ public class AnchorPlugin extends Plugin
 		firstConnectionSyncedAccount = null;
 		eventAlerts.resetStateForWorldHopOrLogin();
 		bingo.clear();
-		log.info("The Anchor features deactivated because the current RSN is not an authenticated clan member");
 	}
 
 	private void syncFirstConnectionData()
@@ -236,10 +233,9 @@ public class AnchorPlugin extends Plugin
 			|| data.connection() != AnchorDataService.Connection.CONNECTED
 			|| client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null) return;
 		String account = Long.toString(client.getAccountHash());
-		if ("0".equals(account)) { log.debug("First connection sync is waiting for the account hash"); return; }
+		if ("0".equals(account)) return;
 		if (account.equals(firstConnectionSyncedAccount)) return;
 		firstConnectionSyncedAccount = account;
-		log.info("First Anchor connection ready for {}; scheduling CA, skill/XP, and PB sync", currentName());
 		clientThread.invokeLater(progress::syncAll);
 		collectionLogSync.retryPending();
 		executor.execute(() -> pbs.syncAll(true));
@@ -254,7 +250,7 @@ public class AnchorPlugin extends Plugin
 	private void runScheduledRefresh()
 	{
 		try { refreshCurrentPlayer(); }
-		catch (RuntimeException e) { log.warn("Unable to refresh Anchor profile and competitions", e); }
+		catch (RuntimeException e) { log.error("Unable to refresh Anchor profile and competitions", e); }
 	}
 	private String currentName() { return client.getLocalPlayer() == null ? null : client.getLocalPlayer().getName(); }
 

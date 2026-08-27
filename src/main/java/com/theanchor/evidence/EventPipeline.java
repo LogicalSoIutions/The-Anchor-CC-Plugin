@@ -84,7 +84,7 @@ public class EventPipeline
 			}
 			catch (Exception e)
 			{
-				log.warn("Could not save evidence metadata for event {} ({})", envelope.eventId, envelope.eventType, e);
+				log.error("Could not save evidence metadata for event {} ({})", envelope.eventId, envelope.eventType, e);
 			}
 			return;
 		}
@@ -92,7 +92,7 @@ public class EventPipeline
 		{
 			if (image == null)
 			{
-				log.warn("Evidence capture returned no screenshot for event {} ({})", envelope.eventId, envelope.eventType);
+				log.error("Evidence capture returned no screenshot for event {} ({})", envelope.eventId, envelope.eventType);
 				return;
 			}
 			try
@@ -103,7 +103,7 @@ public class EventPipeline
 			}
 			catch (Exception e)
 			{
-				log.warn("Could not save evidence for event {} ({})", envelope.eventId, envelope.eventType, e);
+				log.error("Could not save evidence for event {} ({})", envelope.eventId, envelope.eventType, e);
 			}
 		});
 	}
@@ -143,7 +143,7 @@ public class EventPipeline
 		String code = config.authenticationCode() == null ? "" : config.authenticationCode().trim();
 		if (code.isEmpty())
 		{
-			log.warn("Skipped upload for event {} ({}): no authentication code is configured", eventId(record), eventType(record));
+			log.error("Skipped upload for event {} ({}): no authentication code is configured", eventId(record), eventType(record));
 			return;
 		}
 		record.status = AnchorModels.EventStatus.UPLOADING; record.error = null; record.updatedAt = Instant.now().toString(); persist(record);
@@ -163,7 +163,7 @@ public class EventPipeline
 				record.status = AnchorModels.EventStatus.FAILED;
 				record.error = result.error == null ? "Empty server response" : result.error;
 				record.retryCount++;
-				log.warn("Evidence upload failed for event {} ({}): HTTP {}, error={}, retry={}, manual={}",
+				log.error("Evidence upload failed for event {} ({}): HTTP {}, error={}, retry={}, manual={}",
 					eventId(record), eventType(record), result.statusCode, record.error, record.retryCount, manual);
 				if (!manual && result.isRetryable() && record.retryCount <= 5)
 				{
@@ -192,7 +192,6 @@ public class EventPipeline
 		int partySize = party == null ? 1 : party.submittedPartySize;
 		int clanMembers = party == null ? 0 : party.submittedClanMemberCount;
 		int nonClanMembers = party == null ? 0 : party.submittedNonClanMemberCount;
-		log.info("Automatically submitting event {} ({})", eventId(record), eventType(record));
 		updateAndSubmit(record, partySize, clanMembers, nonClanMembers, "");
 	}
 
@@ -201,7 +200,7 @@ public class EventPipeline
 		if (record.submissionId == null)
 		{
 			record.error = "Submission ID is unavailable; retry the upload";
-			log.warn("Could not submit event {}: submission ID is unavailable", eventId(record));
+			log.error("Could not submit event {}: submission ID is unavailable", eventId(record));
 			persist(record);
 			return;
 		}
@@ -217,7 +216,7 @@ public class EventPipeline
 			{
 				record.status = AnchorModels.EventStatus.DRAFT;
 				record.error = patched.error;
-				log.warn("Submission update failed for event {} (submission {}): HTTP {}, error={}",
+				log.error("Submission update failed for event {} (submission {}): HTTP {}, error={}",
 					eventId(record), record.submissionId, patched.statusCode, patched.error);
 				persist(record);
 				return;
@@ -229,7 +228,7 @@ public class EventPipeline
 				{
 					record.status = AnchorModels.EventStatus.DRAFT;
 					record.error = submitted.error;
-					log.warn("Submission failed for event {} (submission {}): HTTP {}, error={}",
+					log.error("Submission failed for event {} (submission {}): HTTP {}, error={}",
 						eventId(record), record.submissionId, submitted.statusCode, submitted.error);
 				}
 				persist(record);
@@ -244,7 +243,7 @@ public class EventPipeline
 		{
 			if (!result.isSuccessful() || result.value == null)
 			{
-				log.warn("Could not refresh submissions: HTTP {}, error={}", result.statusCode,
+				log.error("Could not refresh submissions: HTTP {}, error={}", result.statusCode,
 					result.error == null ? "empty server response" : result.error);
 				return;
 			}
@@ -266,7 +265,7 @@ public class EventPipeline
 	private void persist(EvidenceStore.Record record)
 	{
 		try { store.writeRecord(record); }
-		catch (Exception e) { log.warn("Could not persist event {} ({})", eventId(record), eventType(record), e); }
+		catch (Exception e) { log.error("Could not persist event {} ({})", eventId(record), eventType(record), e); }
 		notifyListeners();
 	}
 	private void notifyListeners() { for (Runnable listener : listeners) listener.run(); }
@@ -297,7 +296,7 @@ public class EventPipeline
 			if (!group.id.equals(submissionGroupId(record)) || record.metadata == null) continue;
 			record.metadata.context.put("submissionTypes", group.types());
 			try { store.writeRecord(record); }
-			catch (Exception e) { log.warn("Could not update submission group {}", group.id, e); }
+			catch (Exception e) { log.error("Could not update submission group {}", group.id, e); }
 		}
 	}
 

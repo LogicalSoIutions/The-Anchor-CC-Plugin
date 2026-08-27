@@ -89,7 +89,6 @@ public class PersonalBestService
 	{
 		if (event.getGroupId() == InterfaceID.JOURNALSCROLL)
 		{
-			log.debug("Adventure Log / JournalScroll interface loaded (groupId={})", event.getGroupId());
 			journalLoaded = true;
 		}
 		Scoreboard scoreboard = scoreboardFor(event.getGroupId()); if (scoreboard != null) pendingScoreboard = scoreboard;
@@ -101,15 +100,12 @@ public class PersonalBestService
 		if (!journalLoaded) return; journalLoaded = false;
 		Widget title = client.getWidget(InterfaceID.Journalscroll.TITLE);
 		String owner = title == null ? null : Text.removeTags(title.getText()).replaceFirst("^The Exploits of ", "").trim();
-		log.debug("Adventure Log tick check: title='{}', owner='{}'", title != null ? title.getText() : null, owner);
 		if (owner != null && !owner.isEmpty() && client.getLocalPlayer() != null && !owner.equalsIgnoreCase(client.getLocalPlayer().getName()) && !owner.equalsIgnoreCase("Counters"))
 		{
-			log.debug("Adventure Log skipped: owner '{}' does not match local player '{}'", owner, client.getLocalPlayer().getName());
 			return;
 		}
 		Widget parent = client.getWidget(InterfaceID.Journalscroll.TEXTLAYER);
 		Widget[] children = collectChildren(parent);
-		log.debug("Adventure Log TEXTLAYER parent widget: {}, total collected child widgets: {}", parent, children.length);
 		if (children.length == 0) return;
 		List<AnchorModels.PbRecord> records = parseAdventureLog(children);
 		if (!records.isEmpty())
@@ -121,16 +117,11 @@ public class PersonalBestService
 				{
 					Double seconds = record.durationMillis / 1000.0;
 					Double previous = known.put(key, seconds);
-					if (previous != null && seconds < previous)
-					{
-						log.debug("Adventure Log updated local PB for {}: {}s (previous {}s)", key, seconds, previous);
-					}
 				}
 			}
 			String fingerprint = fingerprint(records);
 			if (fingerprint.equals(lastFingerprint))
 			{
-				log.debug("Adventure Log PBs already up to date with last sync fingerprint");
 				return;
 			}
 			lastFingerprint = fingerprint;
@@ -218,13 +209,10 @@ public class PersonalBestService
 		AnchorModels.PbBulkRequest request = new AnchorModels.PbBulkRequest(); request.syncId = UUID.randomUUID().toString(); request.capturedAt = Instant.now().toString();
 		request.player = new AnchorModels.PlayerIdentity(); request.player.name = client.getLocalPlayer().getName(); request.player.accountHash = String.valueOf(client.getAccountHash()); request.records.addAll(records);
 		status = "Syncing " + records.size() + " PB" + (records.size() == 1 ? "" : "s") + "…";
-		log.info("Anchor PB sync starting: player={}, records={}, bulk={}", request.player.name, records.size(), bulk);
 		api.syncPbs(request, bulk, result ->
 		{
 			status = result.isSuccessful() ? "PBs synced " + Instant.now() : result.error;
-			if (result.isSuccessful()) log.info(
-				"Anchor PB sync completed: player={}, records={}, syncId={}", request.player.name, records.size(), request.syncId);
-			else log.warn(
+			if (!result.isSuccessful()) log.error(
 				"Anchor PB sync failed: player={}, syncId={}, error={}", request.player.name, request.syncId, result.error);
 
 			if (fromAdventureLog)
@@ -304,7 +292,6 @@ public class PersonalBestService
 				if (!text.isEmpty()) lines.add(text);
 			}
 		}
-		log.debug("Adventure Log raw lines extracted ({} lines): {}", lines.size(), lines);
 		for (int i = 0; i < lines.size(); i++)
 		{
 			String current = lines.get(i);
@@ -366,7 +353,6 @@ public class PersonalBestService
 				heading = line.trim();
 			}
 		}
-		log.info("Adventure Log parsed {} record(s)", result.size());
 		return result;
 	}
 

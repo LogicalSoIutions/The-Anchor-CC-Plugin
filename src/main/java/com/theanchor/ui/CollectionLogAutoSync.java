@@ -74,13 +74,11 @@ public class CollectionLogAutoSync
 		attemptedAccountHash = 0L;
 		if (collectionLogSync.hasCapturedItems())
 		{
-			log.info("Collection log refresh requested with captured items; starting upload for Anchor sync");
 			startUpload();
 		}
 		else
 		{
 			armCapture();
-			log.info("Collection log refresh requested; requesting full item data from the game");
 			requestCollectionData();
 			message("Reading your collection log for The Anchor...");
 		}
@@ -96,8 +94,6 @@ public class CollectionLogAutoSync
 			|| collectionLogSync.hasSyncedCurrentAccount()) return;
 
 		armCapture();
-		log.info("Collection log opened; waiting for exact item rows before automatic Anchor sync: accountHash={}",
-			accountHash);
 	}
 
 	@Subscribe
@@ -122,7 +118,7 @@ public class CollectionLogAutoSync
 		{
 			waitingForCapture = false;
 			requestingCollectionData = false;
-			log.warn("Automatic collection log sync timed out waiting for item rows: openedAtTick={}, currentTick={}",
+			log.error("Automatic collection log sync timed out waiting for item rows: openedAtTick={}, currentTick={}",
 				openedAtTick, client.getTickCount());
 			message("Collection data did not load. Close and reopen your collection log to try again.");
 		}
@@ -158,7 +154,6 @@ public class CollectionLogAutoSync
 		}
 		if (data.connection() != AnchorDataService.Connection.CONNECTED)
 		{
-			log.debug("Automatic collection log sync deferred because The Anchor is not connected");
 			message("The Anchor is not connected. Check your Auth Code in plugin config.");
 			return;
 		}
@@ -173,7 +168,7 @@ public class CollectionLogAutoSync
 		{
 			uploadInProgress = false;
 			attemptedAccountHash = 0L;
-			log.warn("Automatic collection log sync lost capture readiness before upload");
+			log.error("Automatic collection log sync lost capture readiness before upload");
 			message("Collection data is still loading. Wait a moment and try again.");
 		}
 	}
