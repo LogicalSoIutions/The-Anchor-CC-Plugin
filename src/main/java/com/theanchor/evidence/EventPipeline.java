@@ -66,7 +66,10 @@ public class EventPipeline
 		String partySource = source == null ? null : source.name;
 		if (partySource == null && details != null && details.get("record") instanceof AnchorModels.PbRecord)
 			partySource = ((AnchorModels.PbRecord) details.get("record")).activity;
-		envelope.party = includeParty ? parties.snapshot(partySource) : null;
+		boolean individualAward = isIndividualAward(type, partySource, details);
+		envelope.party = includeParty ? parties.snapshot(partySource, individualAward) : null;
+		if (individualAward && envelope.party == null)
+			envelope.party = parties.snapshot(partySource, true);
 		envelope.rulesVersion = rulesVersionOverride == null || rulesVersionOverride.isBlank()
 			? rules.current().version : rulesVersionOverride;
 		envelope.pluginVersion = AnchorApiClient.PLUGIN_VERSION;
@@ -181,9 +184,39 @@ public class EventPipeline
 	{
 		if (!config.autoSubmitEnabled() || record == null || record.metadata == null
 			|| record.metadata.context == null) return false;
+		String type = record.metadata.eventType;
+		if ("loot".equals(type))
+		{
+			// Loot is automatic only when explicitly marked as valuable and the
+			// captured encounter was unambiguously solo. Do not let the legacy
+			// finalizeSubmission flag auto-submit team loot.
+			if (record.metadata.details == null
+				|| !Boolean.TRUE.equals(record.metadata.details.get("autoSubmit"))
+				|| record.metadata.party == null) return false;
+			return record.metadata.party.detectedPartySize == 1
+				&& record.metadata.party.submittedPartySize == 1;
+		}
+		if ("personal_best".equals(type) || "collection_log".equals(type))
+			return record.metadata.details != null
+				&& Boolean.TRUE.equals(record.metadata.details.get("autoSubmit"));
 		Object finalizeSubmission = record.metadata.context.get("finalizeSubmission");
 		return Boolean.TRUE.equals(finalizeSubmission)
 			|| "true".equalsIgnoreCase(String.valueOf(finalizeSubmission));
+	}
+
+	private static boolean isIndividualAward(String type, String sourceName, Map<String, Object> details)
+	{
+		// Every pet is awarded to the individual player, regardless of activity.
+		if ("pet".equals(type) || ("bingo".equals(type) && value(details, "petName") != null))
+			return true;
+		if (!("loot".equals(type) || "bingo".equals(type)) || details == null) return false;
+		return PartyTracker.isIndividualRaidReward(sourceName, value(details, "itemName"));
+	}
+
+	private static String value(Map<String, Object> details, String key)
+	{
+		Object value = details == null ? null : details.get(key);
+		return value == null ? null : String.valueOf(value);
 	}
 
 	private void autoSubmit(EvidenceStore.Record record)

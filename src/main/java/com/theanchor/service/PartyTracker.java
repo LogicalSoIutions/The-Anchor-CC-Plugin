@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Actor;
@@ -32,6 +33,9 @@ import net.runelite.client.util.Text;
 @Singleton
 public class PartyTracker
 {
+	private static final Set<String> INDIVIDUAL_RAID_REWARDS = Set.of(
+		"olmlet", "lil' zik", "lil zik", "metamorphic dust", "twisted kit",
+		"twisted ancestral colour kit", "holy ornament kit", "sanguine ornament kit", "sanguine dust");
 	private static final int ENCOUNTER_IDLE_TICKS = 12;
 	private static final long RECENT_RAID_SOURCE_MILLIS = 15_000L;
 	private static final long COMPLETED_RAID_MILLIS = 10 * 60_000L;
@@ -76,6 +80,17 @@ public class PartyTracker
 	/** Capture party state for the actual loot source; "Multi" means permitted, not assumed. */
 	public AnchorModels.Party snapshot(String sourceName)
 	{
+		return snapshot(sourceName, false);
+	}
+
+	/**
+	 * Some CoX/ToB rewards are awarded to the player who receives them rather
+	 * than split across the raid. Treat only those named rewards as solo for
+	 * submission metadata; ordinary raid loot still uses the full roster.
+	 */
+	public AnchorModels.Party snapshot(String sourceName, boolean individualAward)
+	{
+		if (individualAward) return fixedSoloParty();
 		if (!BossRegistry.canBeMulti(sourceName))
 		{
 			return fixedSoloParty();
@@ -93,6 +108,16 @@ public class PartyTracker
 		List<String> observed = observedNames();
 		if (!observed.isEmpty()) return buildParty(observed.size(), observed, "boss_interaction", "medium");
 		return buildParty(1, localNameList(), "unknown", "low");
+	}
+
+	public static boolean isIndividualRaidReward(String sourceName, String itemName)
+	{
+		if (sourceName == null || itemName == null) return false;
+		String source = BossRegistry.normalize(sourceName);
+		boolean chambers = source.startsWith("chambers of xeric") || source.startsWith("great olm");
+		boolean theatre = source.startsWith("theatre of blood") || source.startsWith("verzik vitur");
+		return (chambers || theatre) && INDIVIDUAL_RAID_REWARDS.contains(
+			itemName.trim().toLowerCase(Locale.ROOT));
 	}
 
 	@Subscribe
