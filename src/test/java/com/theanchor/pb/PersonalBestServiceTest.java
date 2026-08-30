@@ -4,9 +4,18 @@
  */
 package com.theanchor.pb;
 
+import com.theanchor.api.AnchorApiClient;
+import com.theanchor.evidence.EventPipeline;
 import com.theanchor.model.AnchorModels;
+import java.lang.reflect.Field;
+import net.runelite.api.ChatMessageType;
+import net.runelite.api.Client;
+import net.runelite.api.Player;
+import net.runelite.api.events.ChatMessage;
 import org.junit.Test;
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 public class PersonalBestServiceTest
 {
@@ -32,6 +41,66 @@ public class PersonalBestServiceTest
 		assertEquals(90.5, PersonalBestService.parseTime("1:30.5"), 0.001);
 		assertEquals(3690.0, PersonalBestService.parseTime("1:01:30"), 0.001);
 		assertNull(PersonalBestService.parseTime("bad"));
+	}
+
+	@Test public void detectsFightCavesAndInfernoKillCountMessages()
+	{
+		assertEquals("TzHaar Fight Cave", PersonalBestService.specialActivityFromKillCount(
+			"Your TzTok-Jad kill count is: 18."));
+		assertEquals("Inferno", PersonalBestService.specialActivityFromKillCount(
+			"Your TzKal-Zuk kill count is: 7."));
+		assertNull(PersonalBestService.specialActivityFromKillCount(
+			"Your Vorkath kill count is: 100."));
+	}
+
+	@Test public void detectsSpecialActivityNewPersonalBestDuration()
+	{
+		assertEquals(1818.6, PersonalBestService.newPersonalBestDuration(
+			"Duration: 30:18.60 (new personal best)"), 0.001);
+		assertEquals(3690.2, PersonalBestService.newPersonalBestDuration(
+			"Duration: 1:01:30.20 (new personal best)."), 0.001);
+		assertNull(PersonalBestService.newPersonalBestDuration("Duration: 30:18.60"));
+	}
+
+	@Test public void capturesFightCavesAndInfernoPbsAsSubmissions() throws Exception
+	{
+		PersonalBestService service = new PersonalBestService();
+		Client client = mock(Client.class);
+		Player player = mock(Player.class);
+		AnchorApiClient api = mock(AnchorApiClient.class);
+		EventPipeline pipeline = mock(EventPipeline.class);
+		when(client.getLocalPlayer()).thenReturn(player);
+		when(player.getName()).thenReturn("LogicalMash");
+		when(client.getAccountHash()).thenReturn(123L);
+		inject(service, "client", client);
+		inject(service, "api", api);
+		inject(service, "pipeline", pipeline);
+
+		service.onChatMessage(chat("Your TzTok-Jad kill count is: 18."));
+		service.onChatMessage(chat("Duration: 30:18.60 (new personal best)"));
+		service.onChatMessage(chat("Your TzKal-Zuk kill count is: 7."));
+		service.onChatMessage(chat("Duration: 1:01:30.20 (new personal best)"));
+
+		verify(pipeline).capture(eq("personal_best"), eq("TzHaar Fight Cave|1818600"),
+			isNull(), isNull(), anyMap(), eq(false));
+		verify(pipeline).capture(eq("personal_best"), eq("Inferno|3690200"),
+			isNull(), isNull(), anyMap(), eq(false));
+		verify(api, times(2)).syncPbs(any(AnchorModels.PbBulkRequest.class), eq(false), any());
+	}
+
+	private static ChatMessage chat(String text)
+	{
+		ChatMessage event = mock(ChatMessage.class);
+		when(event.getType()).thenReturn(ChatMessageType.GAMEMESSAGE);
+		when(event.getMessage()).thenReturn(text);
+		return event;
+	}
+
+	private static void inject(Object target, String fieldName, Object value) throws Exception
+	{
+		Field field = target.getClass().getDeclaredField(fieldName);
+		field.setAccessible(true);
+		field.set(target, value);
 	}
 
 	@Test public void parsesAdventureLogWidgets()

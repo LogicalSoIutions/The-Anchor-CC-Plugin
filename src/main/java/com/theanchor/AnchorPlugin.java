@@ -60,6 +60,7 @@ import net.runelite.client.util.ImageUtil;
 public class AnchorPlugin extends Plugin
 {
 	static final long PROFILE_AND_COMPETITIONS_REFRESH_MINUTES = 15;
+	static final long PLAYER_PROGRESS_REFRESH_MINUTES = 30;
 
 	@Inject private Client client;
 	@Inject private ClientToolbar toolbar;
@@ -91,6 +92,7 @@ public class AnchorPlugin extends Plugin
 	@Inject private CombatTierEventListener combatTiers;
 	private NavigationButton navigation;
 	private ScheduledFuture<?> refreshTask;
+	private ScheduledFuture<?> progressTask;
 	private List<Object> registered;
 	private volatile boolean featuresActive;
 	private String firstConnectionSyncedAccount;
@@ -114,11 +116,16 @@ public class AnchorPlugin extends Plugin
 			PROFILE_AND_COMPETITIONS_REFRESH_MINUTES,
 			PROFILE_AND_COMPETITIONS_REFRESH_MINUTES,
 			TimeUnit.MINUTES);
+		progressTask = executor.scheduleAtFixedRate(this::runScheduledProgressSync,
+			PLAYER_PROGRESS_REFRESH_MINUTES,
+			PLAYER_PROGRESS_REFRESH_MINUTES,
+			TimeUnit.MINUTES);
 	}
 
 	@Override protected void shutDown()
 	{
 		if (refreshTask != null) { refreshTask.cancel(false); refreshTask = null; }
+		if (progressTask != null) { progressTask.cancel(false); progressTask = null; }
 		deactivateFeatures();
 		registered = null;
 		data.removeListener(connectionListener);
@@ -251,6 +258,12 @@ public class AnchorPlugin extends Plugin
 	{
 		try { refreshCurrentPlayer(); }
 		catch (RuntimeException e) { log.error("Unable to refresh Anchor profile and competitions", e); }
+	}
+	private void runScheduledProgressSync()
+	{
+		if (!featuresActive) return;
+		try { clientThread.invokeLater(progress::syncAll); }
+		catch (RuntimeException e) { log.error("Unable to schedule Anchor player progress sync", e); }
 	}
 	private String currentName() { return client.getLocalPlayer() == null ? null : client.getLocalPlayer().getName(); }
 

@@ -10,7 +10,7 @@ RuneLite Plugin Hub project for The Anchor clan.
 - Durable local outbox and editable loot-submission drafts.
 - Raid scoreboard or observed boss-interaction party estimates, including same-clan participant RSNs while excluding guest names.
 - Live and bulk personal-best sync, including Adventure Log team-size records.
-- Automatic first-connection sync for every Combat Achievement task and all skill levels/XP.
+- Automatic first-connection and 30-minute sync for every Combat Achievement task and all skill levels/XP.
 - One-time collection-log prompt followed by an automatic exact item/quantity upload when the log is opened.
 - Permanent Discord `/connect` code authentication using an `Authorization: Bearer` header.
 

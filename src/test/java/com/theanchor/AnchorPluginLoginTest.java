@@ -9,15 +9,19 @@ import com.theanchor.pb.PersonalBestService;
 import com.theanchor.service.AnchorDataService;
 import com.theanchor.service.BingoService;
 import com.theanchor.service.EventAlertService;
+import com.theanchor.progress.PlayerProgressService;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.client.callback.ClientThread;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -25,9 +29,27 @@ import static org.mockito.Mockito.when;
 
 public class AnchorPluginLoginTest
 {
-	@Test public void refreshesProfileAndCompetitionsEveryFifteenMinutes()
+	@Test public void refreshesProfileAndCompetitionsEveryFifteenMinutesAndProgressEveryThirtyMinutes()
 	{
 		assertEquals(15, AnchorPlugin.PROFILE_AND_COMPETITIONS_REFRESH_MINUTES);
+		assertEquals(30, AnchorPlugin.PLAYER_PROGRESS_REFRESH_MINUTES);
+	}
+
+	@Test public void scheduledProgressSyncDispatchesToClientThread() throws Exception
+	{
+		AnchorPlugin plugin = new AnchorPlugin();
+		ClientThread clientThread = mock(ClientThread.class);
+		PlayerProgressService progress = mock(PlayerProgressService.class);
+		inject(plugin, "clientThread", clientThread);
+		inject(plugin, "progress", progress);
+		inject(plugin, "featuresActive", true);
+
+		invoke(plugin, "runScheduledProgressSync");
+
+		org.mockito.ArgumentCaptor<Runnable> callback = forClass(Runnable.class);
+		verify(clientThread).invokeLater(callback.capture());
+		callback.getValue().run();
+		verify(progress).syncAll();
 	}
 
 	@Test public void refreshesWhenPlayerAppearsAfterLoggedInState() throws Exception
@@ -73,5 +95,12 @@ public class AnchorPluginLoginTest
 		Field field = target.getClass().getDeclaredField(fieldName);
 		field.setAccessible(true);
 		field.set(target, value);
+	}
+
+	private static void invoke(Object target, String methodName) throws Exception
+	{
+		Method method = target.getClass().getDeclaredMethod(methodName);
+		method.setAccessible(true);
+		method.invoke(target);
 	}
 }

@@ -26,6 +26,7 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
@@ -42,6 +43,12 @@ public class PersonalBestService
 	private static final String GROUP = "personalbest";
 	private static final Pattern RECORD = Pattern.compile("^Fastest (?<descriptor>.+): (?<value>-|[0-9:]+(?:\\.[0-9]+)?)$");
 	private static final Pattern TEAM = Pattern.compile("(\\d+)\\+? player", Pattern.CASE_INSENSITIVE);
+	private static final Pattern SPECIAL_ACTIVITY_KILL_COUNT = Pattern.compile(
+		"^Your (?<boss>TzTok-Jad|TzKal-Zuk) kill count is: [0-9,]+\\.?$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern NEW_PB_DURATION = Pattern.compile(
+		"^Duration:?\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)\\.?\\s*\\(new personal best\\)\\.?$",
+		Pattern.CASE_INSENSITIVE);
+	private static final long SPECIAL_ACTIVITY_TIMEOUT_MILLIS = 15_000L;
 	private static final Set<String> DUPLICATE_KEYS = new HashSet<>(java.util.Arrays.asList(
 		"tztok-jad", "tzkal-zuk", "sol heredit", "hueycoatl", "gauntlet", "corrupted gauntlet", "nightmare",
 		"tzhaar fight cave", "inferno", "fortis colosseum", "the gauntlet", "the corrupted gauntlet",
@@ -67,10 +74,13 @@ public class PersonalBestService
 	private String lastFingerprint;
 	private boolean journalLoaded;
 	private Scoreboard pendingScoreboard;
+	private String pendingSpecialActivity;
+	private long pendingSpecialActivityAt;
 
 	public String status() { return status; }
 	public void onLogin()
 	{
+		pendingSpecialActivity = null;
 		hydrateKnown();
 	}
 
@@ -83,6 +93,47 @@ public class PersonalBestService
 		Double previous = known.put(key, seconds);
 		if (previous != null && seconds >= previous) return;
 		sync(java.util.Collections.singletonList(record), false, true, previous);
+	}
+
+	@Subscribe public void onChatMessage(ChatMessage event)
+	{
+		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) return;
+		String message = Text.removeTags(event.getMessage()).replace('\u00A0', ' ').trim();
+		String activity = specialActivityFromKillCount(message);
+		if (activity != null)
+		{
+			pendingSpecialActivity = activity;
+			pendingSpecialActivityAt = System.currentTimeMillis();
+			return;
+		}
+
+		Double seconds = newPersonalBestDuration(message);
+		if (seconds == null) return;
+		String pending = pendingSpecialActivity;
+		long age = System.currentTimeMillis() - pendingSpecialActivityAt;
+		pendingSpecialActivity = null;
+		if (pending == null || age < 0 || age > SPECIAL_ACTIVITY_TIMEOUT_MILLIS) return;
+
+		AnchorModels.PbRecord record = fromKey(pending, seconds);
+		String key = recordKey(record);
+		Double previous = known.put(key, seconds);
+		if (previous != null && seconds >= previous) return;
+		sync(java.util.Collections.singletonList(record), false, true, previous);
+	}
+
+	static String specialActivityFromKillCount(String message)
+	{
+		if (message == null) return null;
+		Matcher matcher = SPECIAL_ACTIVITY_KILL_COUNT.matcher(message.trim());
+		if (!matcher.matches()) return null;
+		return matcher.group("boss").equalsIgnoreCase("TzTok-Jad") ? "TzHaar Fight Cave" : "Inferno";
+	}
+
+	static Double newPersonalBestDuration(String message)
+	{
+		if (message == null) return null;
+		Matcher matcher = NEW_PB_DURATION.matcher(message.trim());
+		return matcher.matches() ? parseTime(matcher.group("time")) : null;
 	}
 
 	@Subscribe public void onWidgetLoaded(WidgetLoaded event)

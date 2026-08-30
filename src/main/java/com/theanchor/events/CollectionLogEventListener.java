@@ -5,8 +5,8 @@
 package com.theanchor.events;
 
 import com.theanchor.evidence.EventPipeline;
+import com.theanchor.evidence.EventDeduplicator;
 import com.theanchor.model.AnchorModels;
-import com.theanchor.service.LootEligibility;
 import com.theanchor.service.RulesService;
 import com.theanchor.service.BingoService;
 import com.theanchor.service.PartyTracker;
@@ -46,6 +46,8 @@ public class CollectionLogEventListener
 	@Inject private ScheduledExecutorService executor;
 	@Inject private ClientThread clientThread;
 	private final AtomicBoolean popupStarted = new AtomicBoolean();
+	/** Chat and popup notifications for one unlock can be separated by several seconds. */
+	private final EventDeduplicator notificationDeduplicator = new EventDeduplicator(30_000L);
 
 	@Subscribe public void onChatMessage(ChatMessage event)
 	{
@@ -77,7 +79,7 @@ public class CollectionLogEventListener
 
 	private void capture(String itemName, String detectionSource)
 	{
-		if (itemName.isEmpty()) return;
+		if (!acceptNotification(itemName, System.currentTimeMillis())) return;
 		List<AnchorModels.Item> items = collectionLogItems(itemName);
 		HashMap<String, Object> details = new HashMap<>();
 		details.put("itemName", itemName);
@@ -98,11 +100,16 @@ public class CollectionLogEventListener
 
 	static List<String> eventTypesFor(List<AnchorModels.Item> items, AnchorModels.Rules rules)
 	{
-		if (items != null)
-			for (AnchorModels.Item item : items)
-				if (LootEligibility.meetsMinimumValue(item, rules))
-					return java.util.Arrays.asList("collection_log", "loot");
+		// LootEventListener owns the actual clue/boss loot event. A collection-log
+		// notification is a separate unlock signal and must not manufacture a
+		// second loot envelope for the same drop.
 		return Collections.singletonList("collection_log");
+	}
+
+	boolean acceptNotification(String itemName, long now)
+	{
+		if (itemName == null || itemName.isEmpty()) return false;
+		return notificationDeduplicator.accept(itemName.toLowerCase(java.util.Locale.ROOT), now);
 	}
 
 	static String normalizeItemName(String value)
