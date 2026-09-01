@@ -40,6 +40,19 @@ public class LootEligibilityTest
 		}
 	}
 
+	@Test public void capturesNightmareUniqueOrbsButNotElementalOrbs()
+	{
+		for (String name : new String[] {"Eldritch orb", "Harmonised orb", "Volatile orb"})
+		{
+			AnchorModels.Item item = item(name, 0);
+			item.tradeable = false;
+			assertTrue(name, LootEligibility.isAlwaysSubmit(name));
+		}
+
+		assertFalse(LootEligibility.isAlwaysSubmit("Air orb"));
+		assertFalse(LootEligibility.isAlwaysSubmit("Earth orb"));
+	}
+
 	@Test public void capturesRepeatableUntradeableCollectionLogLoot()
 	{
 		AnchorModels.Item item = item("Elder venator fang", 200_000L);

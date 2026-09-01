@@ -38,7 +38,9 @@ public final class LootEligibility
 		Pattern.compile("masori body", Pattern.CASE_INSENSITIVE),
 		Pattern.compile("inquisitor", Pattern.CASE_INSENSITIVE),
 		Pattern.compile("nightmare staff", Pattern.CASE_INSENSITIVE),
-		Pattern.compile("orb", Pattern.CASE_INSENSITIVE),
+		// Only the Nightmare unique orbs belong here; matching the bare word
+		// "orb" also captures ordinary Air orb and Earth orb drops.
+		Pattern.compile("^(?:eldritch|harmonised|volatile) orb$", Pattern.CASE_INSENSITIVE),
 		Pattern.compile("parasitic egg", Pattern.CASE_INSENSITIVE),
 		Pattern.compile("zulrah mutagen", Pattern.CASE_INSENSITIVE),
 		Pattern.compile("infernal cape", Pattern.CASE_INSENSITIVE),
