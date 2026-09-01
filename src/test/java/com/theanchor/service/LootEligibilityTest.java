@@ -25,6 +25,21 @@ public class LootEligibilityTest
 		assertTrue(LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
 	}
 
+	@Test public void capturesCustomUntradeableLootRegardlessOfValue()
+	{
+		for (String name : new String[] {
+			"Arcane prayer scroll", "Inquisitor's great helm", "Eldritch orb", "Mokhaiotl cloth",
+			"Ultor vestige", "Magus vestige", "Bellator vestige", "Twisted ancestral colour kit",
+			"Jar of darkness", "Etched elder venator fang", "Mr Mcgroot", "Aggy"
+		})
+		{
+			AnchorModels.Item item = item(name, 0);
+			item.tradeable = false;
+			assertTrue(name, LootEligibility.isAlwaysSubmit(name));
+			assertTrue(name, LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
+		}
+	}
+
 	@Test public void capturesRepeatableUntradeableCollectionLogLoot()
 	{
 		AnchorModels.Item item = item("Elder venator fang", 200_000L);

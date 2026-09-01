@@ -23,6 +23,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -132,7 +133,8 @@ public class CollectionLogSyncServiceTest
 		ArgumentCaptor<AnchorApiClient.ResultCallback> callback = ArgumentCaptor.forClass(AnchorApiClient.ResultCallback.class);
 		verify(api).syncCollectionLog(payload.capture(), callback.capture());
 		assertEquals(Integer.valueOf(4), payload.getValue().items.get("11832"));
-		assertEquals("Dragon axe", payload.getValue().itemNames.get("11832"));
+		assertNull(payload.getValue().itemNames.get("11832"));
+		org.mockito.Mockito.verify(itemManager, org.mockito.Mockito.never()).getItemComposition(11832);
 		verify(promptState, never()).markSyncedForAccount("456");
 		callback.getValue().complete(AnchorApiClient.ApiResult.ok(200, Map.of()));
 		verify(promptState).markSyncedForAccount("456");

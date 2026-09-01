@@ -26,6 +26,9 @@ public interface AnchorConfig extends Config
 	@ConfigSection(name = "Bingo Overlay", description = "Active bingo event overlay", position = 4)
 	String BINGO_OVERLAY = "bingoOverlay";
 
+	@ConfigSection(name = "Testing", description = "Temporary diagnostics for The Anchor", position = 5)
+	String TESTING = "testing";
+
 	@ConfigItem(keyName = "authenticationCode", name = "Authentication code",
 		description = "Run /connect in The Anchor Discord and paste the permanent code here",
 		section = AUTH, position = 0, secret = true)
@@ -95,4 +98,9 @@ public interface AnchorConfig extends Config
 		description = "Choose the text color used by the active event overlay",
 		section = BINGO_OVERLAY, position = 1)
 	default Color bingoOverlayTextColor() { return Color.WHITE; }
+
+	@ConfigItem(keyName = "debugRequestJournal", name = "Debug request journal",
+		description = "Write detailed API request and response JSONL to the The Anchor debug folder (testing only)",
+		section = TESTING, position = 0)
+	default boolean debugRequestJournal() { return false; }
 }

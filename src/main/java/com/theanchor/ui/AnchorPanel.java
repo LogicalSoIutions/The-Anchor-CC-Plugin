@@ -40,6 +40,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.imageio.ImageIO;
 import javax.inject.Inject;
 import net.runelite.client.config.ConfigManager;
@@ -94,6 +95,7 @@ public class AnchorPanel extends PluginPanel {
 	private final SpriteManager spriteManager;
 	private final ItemManager itemManager;
 	private final Runnable dataListener = this::refreshOnEdt;
+	private final AtomicBoolean refreshQueued = new AtomicBoolean();
 	private final JLabel banner = new AspectRatioIconLabel();
 	private final JLabel avatar = new JLabel();
 	private final JLabel identity = new JLabel("Log in to RuneLite", SwingConstants.LEFT);
@@ -359,7 +361,12 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private void refreshOnEdt() {
-		SwingUtilities.invokeLater(this::refresh);
+		if (!refreshQueued.compareAndSet(false, true))
+			return;
+		SwingUtilities.invokeLater(() -> {
+			refreshQueued.set(false);
+			refresh();
+		});
 	}
 
 	public void refreshBanner() {

@@ -7,9 +7,7 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
-import net.runelite.api.MenuAction;
 import net.runelite.api.events.GameTick;
-import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
@@ -23,8 +21,6 @@ import net.runelite.client.eventbus.Subscribe;
 public class CollectionLogAutoSync
 {
 	private static final int CAPTURE_TIMEOUT_TICKS = 20;
-	private static final int COLLECTION_INIT_SCRIPT = 2240;
-	private static final int COLLECTION_LOG_SETUP = 7797;
 
 	private final Client client;
 	private final ClientThread clientThread;
@@ -32,7 +28,6 @@ public class CollectionLogAutoSync
 	private final AnchorDataService data;
 	private final CollectionLogSyncService collectionLogSync;
 	private boolean waitingForCapture;
-	private boolean requestingCollectionData;
 	private boolean uploadInProgress;
 	private long attemptedAccountHash;
 	private int openedAtTick = Integer.MAX_VALUE;
@@ -58,7 +53,6 @@ public class CollectionLogAutoSync
 	{
 		eventBus.unregister(this);
 		waitingForCapture = false;
-		requestingCollectionData = false;
 		uploadInProgress = false;
 	}
 
@@ -79,8 +73,7 @@ public class CollectionLogAutoSync
 		else
 		{
 			armCapture();
-			requestCollectionData();
-			message("Reading your collection log for The Anchor...");
+			message("Open the collection-log Search to load data for The Anchor...");
 		}
 	}
 
@@ -97,27 +90,16 @@ public class CollectionLogAutoSync
 	}
 
 	@Subscribe
-	public void onScriptPostFired(ScriptPostFired event)
-	{
-		if (event.getScriptId() != COLLECTION_LOG_SETUP || !waitingForCapture || requestingCollectionData
-			|| isPohLog() || collectionLogSync.hasCapturedItems()) return;
-
-		requestCollectionData();
-	}
-
-	@Subscribe
 	public void onGameTick(GameTick event)
 	{
 		if (!waitingForCapture || uploadInProgress) return;
 		if (collectionLogSync.isCaptureReadySince(openedAtTick))
 		{
-			requestingCollectionData = false;
 			startUpload();
 		}
 		else if (client.getTickCount() > captureDeadlineTick)
 		{
 			waitingForCapture = false;
-			requestingCollectionData = false;
 			log.error("Automatic collection log sync timed out waiting for item rows: openedAtTick={}, currentTick={}",
 				openedAtTick, client.getTickCount());
 			message("Collection data did not load. Close and reopen your collection log to try again.");
@@ -131,25 +113,11 @@ public class CollectionLogAutoSync
 		waitingForCapture = true;
 	}
 
-	/**
-	 * The game only transmits every collection-log row when Search is opened. Mirror
-	 * RuneProfile/WikiSync by requesting Search data, then re-run init so the player
-	 * remains on the normal collection-log view.
-	 */
-	private void requestCollectionData()
-	{
-		if (requestingCollectionData || isPohLog()) return;
-		requestingCollectionData = true;
-		client.menuAction(-1, InterfaceID.Collection.SEARCH_TOGGLE, MenuAction.CC_OP, 1, -1, "Search", null);
-		client.runScript(COLLECTION_INIT_SCRIPT);
-	}
-
 	private void startUpload()
 	{
 		if (!data.isCurrentPlayerClanMember())
 		{
 			waitingForCapture = false;
-			requestingCollectionData = false;
 			return;
 		}
 		if (data.connection() != AnchorDataService.Connection.CONNECTED)

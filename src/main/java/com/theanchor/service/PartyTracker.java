@@ -6,6 +6,7 @@ package com.theanchor.service;
 
 import com.theanchor.model.AnchorModels;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,6 +20,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
+import net.runelite.api.clan.ClanMember;
 import net.runelite.api.clan.ClanSettings;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.GameStateChanged;
@@ -102,7 +104,11 @@ public class PartyTracker
 			if (stored != null) return stored;
 			List<String> names = raidNames(sourceName);
 			int count = raidCount(sourceName, names.size());
-			if (count > 0) return buildParty(count, names, "raid_party", "high");
+			if (count > 0 || !names.isEmpty())
+				return buildParty(Math.max(1, count), names, "raid_party", confidenceForRoster(count, names));
+			// A raid source without a trustworthy roster must not fall through to
+			// nearby-player detection or be treated as a confirmed solo encounter.
+			return buildParty(1, List.of(), "raid_party", "low");
 		}
 
 		List<String> observed = observedNames();
@@ -130,11 +136,10 @@ public class PartyTracker
 		List<String> finalNames = raidNames(source);
 		if (!finalNames.isEmpty()) updateActiveRaid(source, finalNames);
 		List<String> confirmedNames = sameRaid(source, activeRaidSource) ? activeRaidNames : finalNames;
-		if (confirmedNames.isEmpty()) confirmedNames = localNameList();
 		completedRaidSource = source;
-		completedRaidParty = buildParty(Math.max(activeRaidPartySize,
-			raidCount(source, confirmedNames.size())), confirmedNames,
-			"raid_party_final_boss", "high");
+		int detectedSize = Math.max(activeRaidPartySize, raidCount(source, confirmedNames.size()));
+		completedRaidParty = buildParty(detectedSize, confirmedNames,
+			"raid_party_final_boss", confidenceForRoster(detectedSize, confirmedNames));
 		completedRaidAt = System.currentTimeMillis();
 		activeRaidSource = null;
 		activeRaidNames = List.of();
@@ -286,8 +291,9 @@ public class PartyTracker
 	{
 		if (sameRaid(sourceName, activeRaidSource))
 		{
-			return buildParty(Math.max(activeRaidPartySize, activeRaidNames.size()), activeRaidNames,
-				"raid_party_entry", "high");
+			int size = Math.max(activeRaidPartySize, activeRaidNames.size());
+			return buildParty(size, activeRaidNames, "raid_party_entry",
+				confidenceForRoster(size, activeRaidNames));
 		}
 		if (completedRaidParty != null && completedRaidSource != null
 			&& sameRaid(sourceName, completedRaidSource)
@@ -352,13 +358,44 @@ public class PartyTracker
 	private AnchorModels.Party buildParty(int detectedSize, List<String> names, String method, String confidence)
 	{
 		ClanSettings clan = client.getClanSettings();
+		Set<String> clanNames = clanMemberKeys(clan);
+		boolean clanRosterReady = clanRosterReady(clanNames);
 		List<MemberSnapshot> members = new ArrayList<>();
 		for (String name : dedupe(names))
 		{
-			Boolean clanMember = clan == null ? null : clan.findMember(name) != null;
+			// A missing/empty roster is an unknown state, not proof that a player
+			// is a guest. Once the full local clan roster is available, absence is
+			// a confirmed non-clan result.
+			Boolean clanMember = !clanRosterReady ? null : clanNames.contains(playerNameKey(name));
 			members.add(new MemberSnapshot(name, clanMember));
 		}
-		return snapshotFromData(detectedSize, members, method, confidence);
+		return snapshotFromData(detectedSize, members, method, clanRosterReady ? confidence : "low");
+	}
+
+	private Set<String> clanMemberKeys(ClanSettings clan)
+	{
+		Set<String> names = new HashSet<>();
+		if (clan == null || clan.getMembers() == null) return names;
+		for (ClanMember member : clan.getMembers())
+			if (member != null && member.getName() != null) names.add(playerNameKey(member.getName()));
+		return names;
+	}
+
+	private boolean clanRosterReady(Set<String> clanNames)
+	{
+		Player local = client.getLocalPlayer();
+		return !clanNames.isEmpty() && local != null && local.getName() != null
+			&& clanNames.contains(playerNameKey(local.getName()));
+	}
+
+	private static String playerNameKey(String name)
+	{
+		return clean(name).toLowerCase(Locale.ROOT).replace(" ", "").replace("_", "").replace("-", "");
+	}
+
+	private static String confidenceForRoster(int detectedSize, List<String> names)
+	{
+		return names != null && names.size() >= Math.max(1, detectedSize) ? "high" : "low";
 	}
 
 	static AnchorModels.Party snapshotFromData(int detectedSize, List<MemberSnapshot> members, String method, String confidence)
@@ -422,10 +459,8 @@ public class PartyTracker
 		Widget list = client.getWidget(InterfaceID.RaidsSidepanel.LIST);
 		List<String> names = new ArrayList<>();
 		collectChambersNames(list, names);
-		for (Player player : client.getPlayers())
-		{
-			if (player != null && player.getName() != null) names.add(player.getName());
-		}
+		// client.getPlayers() is the local scene, not the raid roster. Using it
+		// can add unrelated visible players and create false guest counts.
 		return dedupe(names);
 	}
 

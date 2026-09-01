@@ -12,10 +12,13 @@ import java.util.List;
 import net.runelite.api.Client;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
+import net.runelite.api.clan.ClanMember;
+import net.runelite.api.clan.ClanSettings;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.widgets.Widget;
 import org.junit.Test;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.when;
 import static org.junit.Assert.*;
 
@@ -77,6 +80,83 @@ public class PartyTrackerTest
 		assertTrue(party.clanMemberNames.isEmpty());
 	}
 
+	@Test public void unmatchedMemberIsNotReportedAsGuest()
+	{
+		AnchorModels.Party party = PartyTracker.snapshotFromData(3, Arrays.asList(
+			new PartyTracker.MemberSnapshot("Anchor One", true),
+			new PartyTracker.MemberSnapshot("Unmatched Two", null)), "raid_party", "low");
+
+		assertEquals(1, party.detectedClanMemberCount);
+		assertEquals(0, party.detectedNonClanMemberCount);
+		assertEquals(2, party.detectedPartySize - party.detectedClanMemberCount
+			- party.detectedNonClanMemberCount);
+		assertEquals("low", party.confidence);
+	}
+
+	@Test public void clanMembershipUsesFullRosterAndNormalizesNames() throws Exception
+	{
+		PartyTracker tracker = new PartyTracker();
+		Client client = mock(Client.class);
+		Player local = mock(Player.class);
+		ClanSettings settings = mock(ClanSettings.class);
+		ClanMember clanMember = mock(ClanMember.class);
+		when(local.getName()).thenReturn("Anchor One");
+		when(client.getLocalPlayer()).thenReturn(local);
+		when(client.getClanSettings()).thenReturn(settings);
+		when(settings.getMembers()).thenReturn(List.of(clanMember));
+		when(clanMember.getName()).thenReturn("Anchor_One");
+		setField(tracker, "client", client);
+
+		java.lang.reflect.Method method = PartyTracker.class.getDeclaredMethod("buildParty", int.class,
+			List.class, String.class, String.class);
+		method.setAccessible(true);
+		AnchorModels.Party party = (AnchorModels.Party) method.invoke(tracker, 2,
+			List.of("Anchor One", "Guest Two"), "raid_party", "high");
+
+		assertEquals(1, party.detectedClanMemberCount);
+		assertEquals(1, party.detectedNonClanMemberCount);
+		assertEquals(List.of("Anchor One"), party.clanMemberNames);
+	}
+
+	@Test public void chambersRosterDoesNotAddEveryVisiblePlayer() throws Exception
+	{
+		PartyTracker tracker = new PartyTracker();
+		Client client = mock(Client.class);
+		Player visible = mock(Player.class);
+		when(visible.getName()).thenReturn("Visible But Not In Raid");
+		when(client.getPlayers()).thenReturn(List.of(visible));
+		setField(tracker, "client", client);
+
+		java.lang.reflect.Method method = PartyTracker.class.getDeclaredMethod("chambersNames");
+		method.setAccessible(true);
+		@SuppressWarnings("unchecked") List<String> names = (List<String>) method.invoke(tracker);
+
+		assertTrue(names.isEmpty());
+	}
+
+	@Test public void missingFinalRosterCannotBecomeConfirmedSolo() throws Exception
+	{
+		PartyTracker tracker = new PartyTracker();
+		Client client = mock(Client.class);
+		Player local = mock(Player.class);
+		NPC olm = mock(NPC.class);
+		ActorDeath death = mock(ActorDeath.class);
+		when(local.getName()).thenReturn("Anchor One");
+		when(olm.getName()).thenReturn("Great Olm");
+		when(death.getActor()).thenReturn(olm);
+		when(client.getLocalPlayer()).thenReturn(local);
+		when(client.getPlayers()).thenReturn(List.of(local));
+		setField(tracker, "client", client);
+
+		tracker.onActorDeath(death);
+
+		AnchorModels.Party party = tracker.snapshot("Chambers of Xeric");
+		assertEquals(1, party.detectedPartySize);
+		assertEquals(0, party.detectedClanMemberCount);
+		assertEquals(0, party.detectedNonClanMemberCount);
+		assertEquals("low", party.confidence);
+	}
+
 	@Test public void chambersRosterReadsDisplayedNamesAndIgnoresStats()
 	{
 		Widget list = mock(Widget.class);
@@ -92,6 +172,30 @@ public class PartyTrackerTest
 		PartyTracker.collectChambersNames(list, names);
 
 		assertEquals(List.of("Anchor One", "Guest Two"), names);
+	}
+
+	@Test public void theatreAndTombsReadTheirAuthoritativeVarcRosters() throws Exception
+	{
+		PartyTracker tracker = new PartyTracker();
+		Client client = mock(Client.class);
+		when(client.getVarcStrValue(anyInt())).thenAnswer(invocation -> {
+			int id = invocation.getArgument(0);
+			if (id == 330) return "Anchor One";
+			if (id == 331) return "Anchor Two";
+			if (id == 1099) return "Anchor Three";
+			if (id == 1100) return "Anchor Four";
+			return "";
+		});
+		setField(tracker, "client", client);
+
+		java.lang.reflect.Method method = PartyTracker.class.getDeclaredMethod("raidNames", String.class);
+		method.setAccessible(true);
+
+		@SuppressWarnings("unchecked") List<String> theatre = (List<String>) method.invoke(tracker, "Theatre of Blood");
+		@SuppressWarnings("unchecked") List<String> tombs = (List<String>) method.invoke(tracker, "Tombs of Amascut");
+
+		assertEquals(List.of("Anchor One", "Anchor Two"), theatre);
+		assertEquals(List.of("Anchor Three", "Anchor Four"), tombs);
 	}
 
 	@Test public void chambersCompletionKeepsRosterCapturedBeforeFinalTick() throws Exception

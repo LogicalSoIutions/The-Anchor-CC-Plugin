@@ -84,7 +84,9 @@ public class LootEventListener
 		if (individualAward) details.put("individualAward", true);
 		// Only ordinary loot at the clan's value threshold is eligible for automatic
 		// submission; EventPipeline additionally requires the encounter to be solo.
-		if (individualAward || items.stream().anyMatch(item -> LootEligibility.meetsMinimumValue(item, rules.current())))
+		if (individualAward
+			|| items.stream().anyMatch(item -> LootEligibility.isAlwaysSubmit(item.name))
+			|| items.stream().anyMatch(item -> LootEligibility.meetsMinimumValue(item, rules.current())))
 			details.put("autoSubmit", true);
 		pipeline.capture(type, key, source, items, details, true);
 	}

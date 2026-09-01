@@ -29,9 +29,10 @@ public class CollectionLogAutoSyncTest
 		autoSync.refreshRequested();
 
 		assertEquals(CollectionLogSyncOverlay.READING_MESSAGE, autoSync.overlayMessage());
-		verify(client).menuAction(-1, net.runelite.api.gameval.InterfaceID.Collection.SEARCH_TOGGLE,
-			net.runelite.api.MenuAction.CC_OP, 1, -1, "Search", null);
-		verify(client).runScript(2240);
+		verify(client, org.mockito.Mockito.never()).menuAction(org.mockito.ArgumentMatchers.anyInt(),
+			org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
+			org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.isNull());
+		verify(client, org.mockito.Mockito.never()).runScript(org.mockito.ArgumentMatchers.anyInt());
 	}
 
 	@Test

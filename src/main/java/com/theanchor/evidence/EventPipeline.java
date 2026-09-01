@@ -113,8 +113,13 @@ public class EventPipeline
 
 	public void retryAll()
 	{
-		for (EvidenceStore.Record record : store.records())
-			if (record.status == AnchorModels.EventStatus.PENDING || record.status == AnchorModels.EventStatus.FAILED) upload(record, true);
+		// Reading the outbox and the screenshot bytes can be expensive. This method is
+		// also called while features are activated from the client thread.
+		executor.execute(() ->
+		{
+			for (EvidenceStore.Record record : store.records())
+				if (record.status == AnchorModels.EventStatus.PENDING || record.status == AnchorModels.EventStatus.FAILED) upload(record, true);
+		});
 	}
 
 	public List<EvidenceStore.Record> groupRecords(EvidenceStore.Record record)
@@ -152,7 +157,7 @@ public class EventPipeline
 		record.status = AnchorModels.EventStatus.UPLOADING; record.error = null; record.updatedAt = Instant.now().toString(); persist(record);
 		Path screenshot = record.screenshotPath == null || record.screenshotPath.isBlank()
 			? null : Path.of(record.screenshotPath);
-		api.uploadEvent(record.metadata, screenshot, record.format, result ->
+		executor.execute(() -> api.uploadEvent(record.metadata, screenshot, record.format, result ->
 		{
 			boolean autoSubmit = shouldAutoSubmit(record);
 			if (result.isSuccessful() && result.value != null)
@@ -177,7 +182,7 @@ public class EventPipeline
 			record.updatedAt = Instant.now().toString(); persist(record);
 			if (autoSubmit && record.status == AnchorModels.EventStatus.DRAFT)
 				autoSubmit(record);
-		});
+		}));
 	}
 
 	private boolean shouldAutoSubmit(EvidenceStore.Record record)
@@ -194,7 +199,8 @@ public class EventPipeline
 				|| !Boolean.TRUE.equals(record.metadata.details.get("autoSubmit"))
 				|| record.metadata.party == null) return false;
 			return record.metadata.party.detectedPartySize == 1
-				&& record.metadata.party.submittedPartySize == 1;
+				&& record.metadata.party.submittedPartySize == 1
+				&& "high".equals(record.metadata.party.confidence);
 		}
 		if ("personal_best".equals(type) || "collection_log".equals(type))
 			return record.metadata.details != null

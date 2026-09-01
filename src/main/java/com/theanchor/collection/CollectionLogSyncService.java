@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -41,13 +42,14 @@ public class CollectionLogSyncService
 	private final AnchorApiClient api;
 	private final CollectionLogPromptState promptState;
 	private final ItemManager itemManager;
+	private final ScheduledExecutorService executor;
 	private final Map<Integer, Integer> items = new LinkedHashMap<>();
 	private int lastItemScriptTick = -1;
 	private volatile String lastSuccessfulAccountHash;
 
 	@Inject
 	public CollectionLogSyncService(Client client, ConfigManager configManager, Gson gson, AnchorApiClient api,
-		CollectionLogPromptState promptState, ItemManager itemManager)
+		CollectionLogPromptState promptState, ItemManager itemManager, ScheduledExecutorService executor)
 	{
 		this.client = client;
 		this.configManager = configManager;
@@ -55,6 +57,14 @@ public class CollectionLogSyncService
 		this.api = api;
 		this.promptState = promptState;
 		this.itemManager = itemManager;
+		this.executor = executor;
+	}
+
+	/** Keeps the lightweight unit-test constructor while production uses the executor. */
+	public CollectionLogSyncService(Client client, ConfigManager configManager, Gson gson, AnchorApiClient api,
+		CollectionLogPromptState promptState, ItemManager itemManager)
+	{
+		this(client, configManager, gson, api, promptState, itemManager, null);
 	}
 
 	@Subscribe
@@ -111,9 +121,18 @@ public class CollectionLogSyncService
 				COLLECTION_ITEM_SCRIPT, lastItemScriptTick, client.getTickCount());
 			return false;
 		}
-		AnchorModels.CollectionLogRequest request = collect(captured);
-		configManager.setConfiguration(AnchorConfig.GROUP, pendingKey(), gson.toJson(request));
-		send(request, completion);
+		// Capture only the small client-thread-safe metadata here. A full collection
+		// log can contain thousands of rows, so request assembly and serialisation are
+		// deliberately deferred to the worker executor.
+		AnchorModels.CollectionLogRequest request = collectMetadata();
+		Runnable persistAndSend = () ->
+		{
+			addCapturedItems(request, captured, false);
+			configManager.setConfiguration(AnchorConfig.GROUP, pendingKeyFor(request), gson.toJson(request));
+			send(request, completion);
+		};
+		if (executor == null) persistAndSend.run();
+		else executor.execute(persistAndSend);
 		return true;
 	}
 
@@ -140,6 +159,13 @@ public class CollectionLogSyncService
 	{
 		String key = pendingKey();
 		if (key == null) return;
+		Runnable retry = () -> retryPending(key);
+		if (executor == null) retry.run();
+		else executor.execute(retry);
+	}
+
+	private void retryPending(String key)
+	{
 		String json = configManager.getConfiguration(AnchorConfig.GROUP, key);
 		if (json == null || json.isBlank()) return;
 		try
@@ -161,6 +187,13 @@ public class CollectionLogSyncService
 
 	AnchorModels.CollectionLogRequest collect(Map<Integer, Integer> captured)
 	{
+		AnchorModels.CollectionLogRequest request = collectMetadata();
+		addCapturedItems(request, captured, true);
+		return request;
+	}
+
+	private AnchorModels.CollectionLogRequest collectMetadata()
+	{
 		AnchorModels.CollectionLogRequest request = new AnchorModels.CollectionLogRequest();
 		request.syncId = UUID.randomUUID().toString();
 		request.capturedAt = Instant.now().toString();
@@ -174,16 +207,27 @@ public class CollectionLogSyncService
 		addCategory(request, "clues", VarPlayerID.COLLECTION_COUNT_CLUES, VarPlayerID.COLLECTION_COUNT_CLUES_MAX);
 		addCategory(request, "minigames", VarPlayerID.COLLECTION_COUNT_MINIGAMES, VarPlayerID.COLLECTION_COUNT_MINIGAMES_MAX);
 		addCategory(request, "other", VarPlayerID.COLLECTION_COUNT_OTHER, VarPlayerID.COLLECTION_COUNT_OTHER_MAX);
+		return request;
+	}
+
+	private void addCapturedItems(AnchorModels.CollectionLogRequest request, Map<Integer, Integer> captured,
+		boolean includeNames)
+	{
 		if (captured != null)
 		{
 			for (Map.Entry<Integer, Integer> entry : captured.entrySet())
 			{
 				String itemId = String.valueOf(entry.getKey());
 				request.items.put(itemId, entry.getValue());
-				request.itemNames.put(itemId, resolveItemName(entry.getKey()));
+				if (includeNames) request.itemNames.put(itemId, resolveItemName(entry.getKey()));
 			}
 		}
-		return request;
+	}
+
+	private String pendingKeyFor(AnchorModels.CollectionLogRequest request)
+	{
+		return request == null || request.player == null || request.player.accountHash == null
+			? pendingKey() : PENDING_PREFIX + request.player.accountHash;
 	}
 
 	private String resolveItemName(int itemId)

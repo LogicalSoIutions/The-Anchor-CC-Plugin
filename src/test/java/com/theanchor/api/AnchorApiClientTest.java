@@ -8,6 +8,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
@@ -120,6 +122,42 @@ public class AnchorApiClientTest
 			assertEquals("/api/runelite/player-progress", request.getPath());
 			assertEquals("Bearer CODE", request.getHeader("Authorization"));
 			assertTrue(request.getBody().readUtf8().contains("progress-1"));
+		}
+	}
+
+	@Test public void writesOptInRequestJournalWithoutBearerToken() throws Exception
+	{
+		try (MockWebServer server = new MockWebServer())
+		{
+			server.enqueue(new MockResponse().setResponseCode(200).setBody("{}")); server.start();
+			AnchorConfig config = mock(AnchorConfig.class);
+			when(config.authenticationCode()).thenReturn("SECRET-CODE");
+			when(config.debugRequestJournal()).thenReturn(true);
+			ScheduledExecutorService journalExecutor = Executors.newSingleThreadScheduledExecutor();
+			Path journal = Files.createTempFile("anchor-api-journal", ".jsonl");
+			Files.deleteIfExists(journal);
+			try
+			{
+				AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), config,
+					server.url("/").toString(), journalExecutor, journal);
+				AnchorModels.PlayerProgressRequest payload = new AnchorModels.PlayerProgressRequest();
+				payload.syncId = "journal-progress-1";
+				CountDownLatch latch = new CountDownLatch(1);
+				api.syncPlayerProgress(payload, result -> latch.countDown());
+				assertTrue(latch.await(3, TimeUnit.SECONDS));
+				journalExecutor.shutdown();
+				journalExecutor.awaitTermination(3, TimeUnit.SECONDS);
+				String journalText = Files.readString(journal);
+				assertTrue(journalText.contains("\"event\":\"request\""));
+				assertTrue(journalText.contains("\"event\":\"response\""));
+				assertTrue(journalText.contains("journal-progress-1"));
+				assertFalse(journalText.contains("SECRET-CODE"));
+			}
+			finally
+			{
+				journalExecutor.shutdownNow();
+				Files.deleteIfExists(journal);
+			}
 		}
 	}
 
