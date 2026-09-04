@@ -103,4 +103,9 @@ public interface AnchorConfig extends Config
 		description = "Write detailed API request and response JSONL to the The Anchor debug folder (testing only)",
 		section = TESTING, position = 0)
 	default boolean debugRequestJournal() { return false; }
+
+	@ConfigItem(keyName = "debugRaidPartyDetection", name = "Raid party diagnostics",
+		description = "Log detailed CoX, ToB, and ToA party detection data while testing a real raid",
+		section = TESTING, position = 1)
+	default boolean debugRaidPartyDetection() { return false; }
 }

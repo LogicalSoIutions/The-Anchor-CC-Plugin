@@ -4,6 +4,7 @@
  */
 package com.theanchor.service;
 
+import com.theanchor.AnchorConfig;
 import com.theanchor.model.AnchorModels;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -31,10 +32,13 @@ import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.util.Text;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Singleton
 public class PartyTracker
 {
+	private static final Logger log = LoggerFactory.getLogger(PartyTracker.class);
 	private static final Set<String> INDIVIDUAL_RAID_REWARDS = Set.of(
 		"olmlet", "lil' zik", "lil zik", "metamorphic dust", "twisted kit",
 		"twisted ancestral colour kit", "holy ornament kit", "sanguine ornament kit", "sanguine dust");
@@ -45,6 +49,7 @@ public class PartyTracker
 	private static final int TOB_MEMBER_NAME = 330;
 
 	@Inject private Client client;
+	@Inject private AnchorConfig config;
 	private NPC target;
 	private final Map<Player, Boolean> participants = new IdentityHashMap<>();
 	private int idleTicks;
@@ -53,10 +58,13 @@ public class PartyTracker
 	private String activeRaidSource;
 	private List<String> activeRaidNames = List.of();
 	private int activeRaidPartySize;
+	private String raidStatusSource;
+	private final Map<String, Boolean> raidPlayerClanStatus = new LinkedHashMap<>();
 	private AnchorModels.Party completedRaidParty;
 	private String completedRaidSource;
 	private long completedRaidAt;
 	private boolean awaitingCompletedRosterClear;
+	private String lastDebugRosterSignature;
 
 	@Subscribe
 	public void onGameTick(GameTick event)
@@ -101,14 +109,24 @@ public class PartyTracker
 		if (BossRegistry.isRaid(sourceName))
 		{
 			AnchorModels.Party stored = storedRaidParty(sourceName);
-			if (stored != null) return stored;
+			if (stored != null)
+			{
+				debugRaidSnapshot("snapshot-stored", sourceName, stored);
+				return stored;
+			}
 			List<String> names = raidNames(sourceName);
 			int count = raidCount(sourceName, names.size());
 			if (count > 0 || !names.isEmpty())
-				return buildParty(Math.max(1, count), names, "raid_party", confidenceForRoster(count, names));
+			{
+				AnchorModels.Party party = buildParty(Math.max(1, count), names, "raid_party", confidenceForRoster(count, names));
+				debugRaidSnapshot("snapshot-live", sourceName, party);
+				return party;
+			}
 			// A raid source without a trustworthy roster must not fall through to
 			// nearby-player detection or be treated as a confirmed solo encounter.
-			return buildParty(1, List.of(), "raid_party", "low");
+			AnchorModels.Party party = buildParty(1, List.of(), "raid_party", "low");
+			debugRaidSnapshot("snapshot-empty", sourceName, party);
+			return party;
 		}
 
 		List<String> observed = observedNames();
@@ -133,6 +151,7 @@ public class PartyTracker
 		if (!(actor instanceof NPC)) return;
 		String source = finalBossRaid(((NPC) actor).getName());
 		if (source == null) return;
+		observeRaidWorldView(source);
 		List<String> finalNames = raidNames(source);
 		if (!finalNames.isEmpty()) updateActiveRaid(source, finalNames);
 		List<String> confirmedNames = sameRaid(source, activeRaidSource) ? activeRaidNames : finalNames;
@@ -140,6 +159,7 @@ public class PartyTracker
 		int detectedSize = Math.max(activeRaidPartySize, raidCount(source, confirmedNames.size()));
 		completedRaidParty = buildParty(detectedSize, confirmedNames,
 			"raid_party_final_boss", confidenceForRoster(detectedSize, confirmedNames));
+		debugRaidSnapshot("final-boss", source, completedRaidParty);
 		completedRaidAt = System.currentTimeMillis();
 		activeRaidSource = null;
 		activeRaidNames = List.of();
@@ -154,6 +174,7 @@ public class PartyTracker
 		if (npc == null) return;
 		String source = firstBossRaid(npc.getName());
 		if (source == null || (activeRaidSource != null && !sameRaid(source, activeRaidSource))) return;
+		observeRaidWorldView(source);
 		List<String> names = raidNames(source);
 		if (names.isEmpty()) return;
 		awaitingCompletedRosterClear = false;
@@ -169,6 +190,8 @@ public class PartyTracker
 			activeRaidSource = null;
 			activeRaidNames = List.of();
 			activeRaidPartySize = 0;
+			raidStatusSource = null;
+			raidPlayerClanStatus.clear();
 			completedRaidParty = null;
 			completedRaidSource = null;
 			completedRaidAt = 0;
@@ -221,10 +244,13 @@ public class PartyTracker
 		if (awaitingCompletedRosterClear && completedRosterCleared())
 		{
 			awaitingCompletedRosterClear = false;
+			raidStatusSource = null;
+			raidPlayerClanStatus.clear();
 		}
 
 		if (activeRaidSource != null)
 		{
+			observeRaidWorldView(activeRaidSource);
 			List<String> names = raidNames(activeRaidSource);
 			if (!names.isEmpty()) updateActiveRaid(activeRaidSource, names);
 			return;
@@ -278,11 +304,17 @@ public class PartyTracker
 		else
 		{
 			activeRaidPartySize = 0;
+			if (!sameRaid(source, raidStatusSource)) raidPlayerClanStatus.clear();
+			raidStatusSource = source;
 		}
-		activeRaidPartySize = Math.max(activeRaidPartySize, raidCount(source, cleaned.size()));
+		// Named roster entries are the authoritative size. The CoX party-size
+		// varbit can briefly contain stale data while the instance is changing.
+		// Only use it later as a fallback when no names are available.
+		activeRaidPartySize = Math.max(activeRaidPartySize, cleaned.size());
 		if (source.equals(activeRaidSource) && cleaned.equals(activeRaidNames)) return;
 		activeRaidSource = source;
 		activeRaidNames = cleaned;
+		debugRaidRoster("roster-changed", source, cleaned);
 		recentRaidSource = source;
 		recentRaidSourceAt = System.currentTimeMillis();
 	}
@@ -366,10 +398,18 @@ public class PartyTracker
 			// A missing/empty roster is an unknown state, not proof that a player
 			// is a guest. Once the full local clan roster is available, absence is
 			// a confirmed non-clan result.
-			Boolean clanMember = !clanRosterReady ? null : clanNames.contains(playerNameKey(name));
+			Boolean observedStatus = method.startsWith("raid_")
+				? raidPlayerClanStatus.get(playerNameKey(name)) : null;
+			// Prefer the complete clan-settings roster. The per-player flag is the
+			// fallback for raid members that are visible in the instance but whose
+			// names are not available in the settings lookup yet.
+			Boolean clanMember = clanRosterReady
+				? Boolean.valueOf(clanNames.contains(playerNameKey(name)))
+				: observedStatus;
 			members.add(new MemberSnapshot(name, clanMember));
 		}
-		return snapshotFromData(detectedSize, members, method, clanRosterReady ? confidence : "low");
+		return snapshotFromData(detectedSize, members, method,
+			clanRosterReady || !raidPlayerClanStatus.isEmpty() ? confidence : "low");
 	}
 
 	private Set<String> clanMemberKeys(ClanSettings clan)
@@ -436,9 +476,9 @@ public class PartyTracker
 	{
 		String source = BossRegistry.normalize(sourceName);
 		if (source.startsWith("chambers of xeric"))
-			return Math.max(namedCount, client.getVarbitValue(VarbitID.RAIDS_CLIENT_PARTYSIZE));
+			return namedCount > 0 ? namedCount : client.getVarbitValue(VarbitID.RAIDS_CLIENT_PARTYSIZE);
 		if (source.startsWith("tombs of amascut"))
-			return Math.max(namedCount, toaPartyCount());
+			return namedCount > 0 ? namedCount : toaPartyCount();
 		return namedCount;
 	}
 
@@ -456,12 +496,100 @@ public class PartyTracker
 
 	private List<String> chambersNames()
 	{
+		beginRaidStatus("Chambers of Xeric");
 		Widget list = client.getWidget(InterfaceID.RaidsSidepanel.LIST);
-		List<String> names = new ArrayList<>();
-		collectChambersNames(list, names);
-		// client.getPlayers() is the local scene, not the raid roster. Using it
-		// can add unrelated visible players and create false guest counts.
-		return dedupe(names);
+		List<String> panelNames = new ArrayList<>();
+		collectChambersNames(list, panelNames);
+		// The local player's exact WorldView is the active raid instance. The
+		// side-panel names are retained as a fallback when that view is unavailable.
+		// Client.getPlayers() is the top-level view and may contain unrelated
+		// players while the local player is inside an instanced raid.
+		List<String> worldViewNames = new ArrayList<>();
+		Player local = client.getLocalPlayer();
+		if (local != null && local.getWorldView() != null && client.isInInstancedRegion())
+			for (Player player : local.getWorldView().players())
+				if (player != null && player.getName() != null)
+				{
+					worldViewNames.add(player.getName());
+					raidPlayerClanStatus.put(playerNameKey(player.getName()), player.isClanMember());
+				}
+		return dedupe(worldViewNames.isEmpty() ? panelNames : worldViewNames);
+	}
+
+	private void beginRaidStatus(String source)
+	{
+		if (!sameRaid(source, raidStatusSource))
+		{
+			raidPlayerClanStatus.clear();
+			raidStatusSource = source;
+		}
+	}
+
+	private void observeRaidWorldView(String source)
+	{
+		beginRaidStatus(source);
+		Player local = client.getLocalPlayer();
+		if (local == null || local.getWorldView() == null || !client.isInInstancedRegion()) return;
+		for (Player player : local.getWorldView().players())
+			if (player != null && player.getName() != null)
+				raidPlayerClanStatus.put(playerNameKey(player.getName()), player.isClanMember());
+	}
+
+	private void debugRaidRoster(String reason, String source, List<String> names)
+	{
+		if (config == null || !config.debugRaidPartyDetection()) return;
+		String signature = reason + "|" + raidKey(source) + "|" + names + "|" + raidPlayerClanStatus;
+		if (signature.equals(lastDebugRosterSignature)) return;
+		lastDebugRosterSignature = signature;
+		log.info("Raid party debug [{}]: {}", reason, raidDebugState(source, names));
+	}
+
+	private void debugRaidSnapshot(String reason, String source, AnchorModels.Party party)
+	{
+		if (config == null || !config.debugRaidPartyDetection()) return;
+		log.info("Raid party debug [{}]: {} party={}", reason, raidDebugState(source, null), partyDebugState(party));
+	}
+
+	private String raidDebugState(String source, List<String> names)
+	{
+		Player local = client.getLocalPlayer();
+		List<String> worldViewPlayers = new ArrayList<>();
+		if (local != null && local.getWorldView() != null)
+			for (Player player : local.getWorldView().players())
+				if (player != null && player.getName() != null)
+					worldViewPlayers.add(player.getName() + "=" + player.isClanMember());
+		ClanSettings clan = client.getClanSettings();
+		List<String> clanMembers = new ArrayList<>();
+		if (clan != null && clan.getMembers() != null)
+			for (ClanMember member : clan.getMembers())
+				if (member != null && member.getName() != null) clanMembers.add(member.getName());
+		int varbitPartySize = BossRegistry.normalize(source).startsWith("chambers of xeric")
+			? client.getVarbitValue(VarbitID.RAIDS_CLIENT_PARTYSIZE) : -1;
+		return "source=" + source
+			+ " inInstance=" + client.isInInstancedRegion()
+			+ " local=" + (local == null ? null : local.getName())
+			+ " names=" + (names == null ? raidNames(source) : names)
+			+ " activeNames=" + activeRaidNames
+			+ " activeSize=" + activeRaidPartySize
+			+ " varbitPartySize=" + varbitPartySize
+			+ " worldViewPlayers=" + worldViewPlayers
+			+ " cachedClanFlags=" + raidPlayerClanStatus
+			+ " clanRosterReady=" + clanRosterReady(clanMemberKeys(clan))
+			+ " clanMembers=" + clanMembers;
+	}
+
+	private static String partyDebugState(AnchorModels.Party party)
+	{
+		if (party == null) return "null";
+		List<String> members = new ArrayList<>();
+		for (AnchorModels.PartyMember member : party.members)
+			if (member != null) members.add(member.name + "=" + member.clanMember);
+		return "method=" + party.method
+			+ ", confidence=" + party.confidence
+			+ ", detectedSize=" + party.detectedPartySize
+			+ ", clanCount=" + party.detectedClanMemberCount
+			+ ", nonClanCount=" + party.detectedNonClanMemberCount
+			+ ", members=" + members;
 	}
 
 	static void collectChambersNames(Widget widget, List<String> names)
