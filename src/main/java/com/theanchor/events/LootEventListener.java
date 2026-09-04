@@ -19,8 +19,11 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
+import net.runelite.api.gameval.NpcID;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.NpcLootReceived;
+import net.runelite.client.events.ServerNpcLoot;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStack;
 import net.runelite.client.plugins.loottracker.LootReceived;
@@ -34,6 +37,14 @@ public class LootEventListener
 	@Inject private EventPipeline pipeline;
 	@Inject private BingoService bingo;
 	@Inject private PartyTracker parties;
+
+	/** Yama loot is published by RuneLite as ServerNpcLoot rather than NpcLootReceived. */
+	@Subscribe public void onServerNpcLoot(ServerNpcLoot event)
+	{
+		NPCComposition composition = event.getComposition();
+		if (composition == null || composition.getId() != NpcID.YAMA) return;
+		dispatch(event.getItems(), composition.getName(), composition.getId(), "npc");
+	}
 
 	@Subscribe public void onNpcLootReceived(NpcLootReceived event)
 	{

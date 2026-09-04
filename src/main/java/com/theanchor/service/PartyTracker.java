@@ -71,15 +71,27 @@ public class PartyTracker
 	{
 		pollRaidRoster();
 		Player local = client.getLocalPlayer();
+		List<Player> instancePlayers = instancedWorldViewPlayers();
 		NPC current = local != null && local.getInteracting() instanceof NPC
 			? (NPC) local.getInteracting() : interactingNpc(client.getPlayers());
+		if (current == null) current = interactingNpc(instancePlayers);
 		if (current != null)
 		{
 			if (target != current) { target = current; participants.clear(); }
 			idleTicks = 0;
 			if (local != null) participants.put(local, Boolean.TRUE);
-			for (Player player : client.getPlayers())
-				if (player != null && player.getInteracting() == target) participants.put(player, Boolean.TRUE);
+			if (isYama(target) && !instancePlayers.isEmpty())
+			{
+				// Yama is instanced: every player in the local WorldView is in the
+				// encounter, including a duo partner who is not attacking on this tick.
+				for (Player player : instancePlayers)
+					if (player != null && player.getName() != null) participants.put(player, Boolean.TRUE);
+			}
+			else
+			{
+				for (Player player : client.getPlayers())
+					if (player != null && player.getInteracting() == target) participants.put(player, Boolean.TRUE);
+			}
 		}
 		else if (target != null && ++idleTicks > ENCOUNTER_IDLE_TICKS)
 		{
@@ -127,6 +139,14 @@ public class PartyTracker
 			AnchorModels.Party party = buildParty(1, List.of(), "raid_party", "low");
 			debugRaidSnapshot("snapshot-empty", sourceName, party);
 			return party;
+		}
+
+		if (isYamaSource(sourceName))
+		{
+			List<String> names = new ArrayList<>(yamaNames());
+			names.addAll(observedNames());
+			names = dedupe(names);
+			if (!names.isEmpty()) return buildParty(names.size(), names, "instance_party", "high");
 		}
 
 		List<String> observed = observedNames();
@@ -398,7 +418,7 @@ public class PartyTracker
 			// A missing/empty roster is an unknown state, not proof that a player
 			// is a guest. Once the full local clan roster is available, absence is
 			// a confirmed non-clan result.
-			Boolean observedStatus = method.startsWith("raid_")
+			Boolean observedStatus = (method.startsWith("raid_") || "instance_party".equals(method))
 				? raidPlayerClanStatus.get(playerNameKey(name)) : null;
 			// Prefer the complete clan-settings roster. The per-player flag is the
 			// fallback for raid members that are visible in the instance but whose
@@ -514,6 +534,28 @@ public class PartyTracker
 					raidPlayerClanStatus.put(playerNameKey(player.getName()), player.isClanMember());
 				}
 		return dedupe(worldViewNames.isEmpty() ? panelNames : worldViewNames);
+	}
+
+	private List<String> yamaNames()
+	{
+		beginRaidStatus("Yama");
+		List<String> names = new ArrayList<>();
+		for (Player player : instancedWorldViewPlayers())
+			if (player != null && player.getName() != null)
+			{
+				names.add(player.getName());
+				raidPlayerClanStatus.put(playerNameKey(player.getName()), player.isClanMember());
+			}
+		return dedupe(names);
+	}
+
+	private List<Player> instancedWorldViewPlayers()
+	{
+		Player local = client.getLocalPlayer();
+		if (local == null || local.getWorldView() == null || !client.isInInstancedRegion()) return List.of();
+		List<Player> players = new ArrayList<>();
+		for (Player player : local.getWorldView().players()) players.add(player);
+		return players;
 	}
 
 	private void beginRaidStatus(String source)
@@ -654,6 +696,16 @@ public class PartyTracker
 	private static String clean(String value)
 	{
 		return value == null ? "" : Text.removeTags(value).replace('\u00a0', ' ').trim();
+	}
+
+	private static boolean isYama(NPC npc)
+	{
+		return npc != null && isYamaSource(npc.getName());
+	}
+
+	private static boolean isYamaSource(String source)
+	{
+		return "yama".equals(BossRegistry.normalize(clean(source)));
 	}
 
 	static final class MemberSnapshot

@@ -3,6 +3,7 @@ package com.theanchor.evidence;
 import com.theanchor.AnchorConfig;
 import com.theanchor.api.AnchorApiClient;
 import com.theanchor.model.AnchorModels;
+import com.theanchor.service.BossRegistry;
 import com.theanchor.service.PartyTracker;
 import com.theanchor.service.RulesService;
 import java.nio.file.Path;
@@ -17,6 +18,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -29,9 +31,11 @@ import org.slf4j.LoggerFactory;
 public class EventPipeline
 {
 	private static final Logger log = LoggerFactory.getLogger(EventPipeline.class);
+	private static final long RAID_GROUP_SETTLE_MILLIS = 1_500L;
 	private final EventDeduplicator deduplicator = new EventDeduplicator(8_000L);
 	private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
 	private final Map<String, CaptureGroup> captureGroups = new ConcurrentHashMap<>();
+	private final Set<String> raidGroupsBeingSubmitted = ConcurrentHashMap.newKeySet();
 	private volatile CaptureGroup recentTriggerGroup;
 	@Inject private Client client;
 	@Inject private AnchorConfig config;
@@ -59,6 +63,8 @@ public class EventPipeline
 		long now = System.currentTimeMillis();
 		if (local == null || local.getName() == null || !deduplicator.accept(type + '|' + dedupeKey, now)) return;
 		CaptureGroup group = groupFor(type, source, details, now);
+		boolean coordinatedRaidEvidence = group.coordinatesRaidEvidence(type);
+		group.captureStarted(now);
 		AnchorModels.EventEnvelope envelope = new AnchorModels.EventEnvelope();
 		envelope.eventId = UUID.randomUUID().toString(); envelope.eventType = type; envelope.capturedAt = Instant.now().toString();
 		envelope.player = new AnchorModels.PlayerIdentity(); envelope.player.name = local.getName(); envelope.player.accountHash = String.valueOf(client.getAccountHash());
@@ -68,6 +74,11 @@ public class EventPipeline
 			partySource = ((AnchorModels.PbRecord) details.get("record")).activity;
 		boolean individualAward = isIndividualAward(type, partySource, details);
 		envelope.party = includeParty ? parties.snapshot(partySource, individualAward) : null;
+		// Collection-log notifications normally have no party metadata. Keep a
+		// provisional raid roster for a clog-only raid; prepareRaidGroup removes it
+		// when normal raid loot supplies the authoritative roster.
+		if (envelope.party == null && "collection_log".equals(type) && isRaidSource(partySource))
+			envelope.party = parties.snapshot(partySource, false);
 		if (individualAward && envelope.party == null)
 			envelope.party = parties.snapshot(partySource, true);
 		envelope.rulesVersion = rulesVersionOverride == null || rulesVersionOverride.isBlank()
@@ -83,10 +94,13 @@ public class EventPipeline
 			try
 			{
 				EvidenceStore.Record record = store.saveMetadata(envelope); notifyListeners();
-				upload(record, false);
+				group.captureFinished();
+				if (coordinatedRaidEvidence) queueRaidGroup(group);
+				else upload(record, false);
 			}
 			catch (Exception e)
 			{
+				group.captureFinished();
 				log.error("Could not save evidence metadata for event {} ({})", envelope.eventId, envelope.eventType, e);
 			}
 			return;
@@ -95,6 +109,7 @@ public class EventPipeline
 		{
 			if (image == null)
 			{
+				group.captureFinished();
 				log.error("Evidence capture returned no screenshot for event {} ({})", envelope.eventId, envelope.eventType);
 				return;
 			}
@@ -102,10 +117,13 @@ public class EventPipeline
 			{
 				envelope.context.put("submissionTypes", group.types());
 				EvidenceStore.Record record = store.save(envelope, image); notifyListeners();
-				upload(record, false);
+				group.captureFinished();
+				if (coordinatedRaidEvidence) queueRaidGroup(group);
+				else upload(record, false);
 			}
 			catch (Exception e)
 			{
+				group.captureFinished();
 				log.error("Could not save evidence for event {} ({})", envelope.eventId, envelope.eventType, e);
 			}
 		});
@@ -181,8 +199,114 @@ public class EventPipeline
 			}
 			record.updatedAt = Instant.now().toString(); persist(record);
 			if (autoSubmit && record.status == AnchorModels.EventStatus.DRAFT)
-				autoSubmit(record);
+			{
+				if (isCoordinatedRaidRecord(record)) maybeAutoSubmitRaidGroup(record);
+				else autoSubmit(record);
+			}
 		}));
+	}
+
+	private boolean isCoordinatedRaidRecord(EvidenceStore.Record record)
+	{
+		if (record == null || record.metadata == null) return false;
+		String type = record.metadata.eventType;
+		return ("loot".equals(type) || "collection_log".equals(type))
+			&& isRaidSource(record.metadata.source == null ? null : record.metadata.source.name);
+	}
+
+	private void queueRaidGroup(CaptureGroup group)
+	{
+		if (group == null) return;
+		synchronized (group)
+		{
+			if (group.uploadTask != null) group.uploadTask.cancel(false);
+			group.uploadTask = executor.schedule(() -> uploadRaidGroupWhenReady(group),
+				RAID_GROUP_SETTLE_MILLIS, TimeUnit.MILLISECONDS);
+		}
+	}
+
+	private void uploadRaidGroupWhenReady(CaptureGroup group)
+	{
+		if (group == null) return;
+		synchronized (group)
+		{
+			if (group.pendingCaptures > 0)
+			{
+				group.uploadTask = executor.schedule(() -> uploadRaidGroupWhenReady(group),
+					RAID_GROUP_SETTLE_MILLIS, TimeUnit.MILLISECONDS);
+				return;
+			}
+			if (group.uploadStarted) return;
+			group.uploadStarted = true;
+		}
+
+		List<EvidenceStore.Record> records = groupRecords(group.id);
+		if (records.isEmpty()) return;
+		prepareRaidGroup(records);
+		for (EvidenceStore.Record member : records)
+			if (member.status == AnchorModels.EventStatus.PENDING || member.status == AnchorModels.EventStatus.FAILED)
+				upload(member, false);
+	}
+
+	private List<EvidenceStore.Record> groupRecords(String groupId)
+	{
+		List<EvidenceStore.Record> records = new ArrayList<>();
+		if (groupId == null) return records;
+		for (EvidenceStore.Record record : store.records())
+			if (groupId.equals(submissionGroupId(record))) records.add(record);
+		return records;
+	}
+
+	private void prepareRaidGroup(List<EvidenceStore.Record> records)
+	{
+		boolean hasLoot = records.stream().anyMatch(record -> record.metadata != null
+			&& "loot".equals(record.metadata.eventType));
+		for (EvidenceStore.Record record : records)
+		{
+			if (record.metadata == null || !"collection_log".equals(record.metadata.eventType)
+				|| !isRaidSource(record.metadata.source == null ? null : record.metadata.source.name)) continue;
+			if (hasLoot)
+			{
+				// The normal raid-loot envelope is authoritative for the roster.
+				record.metadata.party = null;
+			}
+			else if (record.metadata.party == null)
+			{
+				record.metadata.party = parties.snapshot(record.metadata.source.name, false);
+			}
+			try { store.writeRecord(record); }
+			catch (Exception e) { log.error("Could not prepare raid evidence group {}", submissionGroupId(record), e); }
+		}
+	}
+
+	private void maybeAutoSubmitRaidGroup(EvidenceStore.Record trigger)
+	{
+		String groupId = trigger == null ? null : submissionGroupId(trigger);
+		List<EvidenceStore.Record> records = groupRecords(groupId);
+		if (records.isEmpty()) return;
+		for (EvidenceStore.Record record : records)
+			if (record.status != AnchorModels.EventStatus.DRAFT) return;
+
+		AnchorModels.Party party = null;
+		for (EvidenceStore.Record record : records)
+			if (record.metadata != null && "loot".equals(record.metadata.eventType) && record.metadata.party != null)
+			{
+				party = record.metadata.party;
+				break;
+			}
+		if (party == null)
+			for (EvidenceStore.Record record : records)
+				if (record.metadata != null && record.metadata.party != null)
+				{
+					party = record.metadata.party;
+					break;
+				}
+
+		List<EvidenceStore.Record> eligible = new ArrayList<>();
+		for (EvidenceStore.Record record : records)
+			if (shouldAutoSubmit(record)) eligible.add(record);
+		if (eligible.isEmpty() || groupId == null || !raidGroupsBeingSubmitted.add(groupId)) return;
+		for (EvidenceStore.Record record : eligible) autoSubmit(record, party);
 	}
 
 	private boolean shouldAutoSubmit(EvidenceStore.Record record)
@@ -228,6 +352,11 @@ public class EventPipeline
 	private void autoSubmit(EvidenceStore.Record record)
 	{
 		AnchorModels.Party party = record.metadata.party;
+		autoSubmit(record, party);
+	}
+
+	private void autoSubmit(EvidenceStore.Record record, AnchorModels.Party party)
+	{
 		int partySize = party == null ? 1 : party.submittedPartySize;
 		int clanMembers = party == null ? 0 : party.submittedClanMemberCount;
 		int nonClanMembers = party == null ? 0 : party.submittedNonClanMemberCount;
@@ -320,7 +449,8 @@ public class EventPipeline
 			boolean triggerPair = recent != null && now - recent.lastSeen <= 4_000L
 				&& (("bingo".equals(type) && recent.contains("personal_best"))
 					|| ("personal_best".equals(type) && recent.contains("bingo")));
-			group = triggerPair ? recent : new CaptureGroup(UUID.randomUUID().toString(), now);
+			group = triggerPair ? recent : new CaptureGroup(UUID.randomUUID().toString(), now,
+				isRaidSource(source == null ? null : source.name));
 			if (key != null) captureGroups.put(key, group);
 		}
 		group.add(type, now);
@@ -349,7 +479,22 @@ public class EventPipeline
 			else if (record instanceof java.util.Map) value = String.valueOf(((java.util.Map<?, ?>) record).get("activity"));
 		}
 		if (value == null || value.isBlank() || "null".equals(value)) return null;
-		return value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
+		String normalized = value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
+		// Loot and collection-log sources can use different raid variants (for
+		// example, normal versus hard mode). They still belong to one evidence
+		// group for this completion.
+		if (isRaidSource(value))
+		{
+			if (normalized.startsWith("chambersofxeric")) return "chambersofxeric";
+			if (normalized.startsWith("theatreofblood")) return "theatreofblood";
+			if (normalized.startsWith("tombsofamascut")) return "tombsofamascut";
+		}
+		return normalized;
+	}
+
+	private static boolean isRaidSource(String source)
+	{
+		return source != null && BossRegistry.isRaid(source);
 	}
 
 	public static String submissionGroupId(EvidenceStore.Record record)
@@ -362,12 +507,27 @@ public class EventPipeline
 	private static final class CaptureGroup
 	{
 		private final String id;
+		private final boolean raid;
 		private final Set<String> eventTypes = new LinkedHashSet<>();
 		private long lastSeen;
-		private CaptureGroup(String id, long lastSeen) { this.id = id; this.lastSeen = lastSeen; }
+		private int pendingCaptures;
+		private boolean uploadStarted;
+		private ScheduledFuture<?> uploadTask;
+		private CaptureGroup(String id, long lastSeen, boolean raid)
+		{
+			this.id = id;
+			this.lastSeen = lastSeen;
+			this.raid = raid;
+		}
 		private synchronized void add(String type, long seen) { eventTypes.add(type); lastSeen = seen; }
 		private synchronized boolean contains(String type) { return eventTypes.contains(type); }
 		private synchronized List<String> types() { return new ArrayList<>(eventTypes); }
+		private synchronized boolean coordinatesRaidEvidence(String type)
+		{
+			return raid && ("loot".equals(type) || "collection_log".equals(type));
+		}
+		private synchronized void captureStarted(long started) { pendingCaptures++; lastSeen = started; }
+		private synchronized void captureFinished() { pendingCaptures = Math.max(0, pendingCaptures - 1); }
 	}
 
 	private static String eventId(EvidenceStore.Record record) { return record == null || record.metadata == null ? "unknown" : record.metadata.eventId; }

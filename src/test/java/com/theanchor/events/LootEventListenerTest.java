@@ -9,7 +9,10 @@ import java.util.Collections;
 import java.util.List;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
+import net.runelite.api.gameval.NpcID;
 import net.runelite.client.events.NpcLootReceived;
+import net.runelite.client.events.ServerNpcLoot;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStack;
 import org.junit.Test;
@@ -60,6 +63,42 @@ public class LootEventListenerTest
 
 		verify(pipeline).capture(eq("bingo"), eq("twisted bow"), any(AnchorModels.Source.class),
 			any(List.class), any(java.util.Map.class), eq(true), eq("2026-08-04.3"), eq(true), eq(true));
+	}
+
+	@Test public void capturesYamaServerLoot() throws Exception
+	{
+		LootEventListener listener = new LootEventListener();
+		ItemManager items = mock(ItemManager.class);
+		RulesService rules = mock(RulesService.class);
+		EventPipeline pipeline = mock(EventPipeline.class);
+		BingoService bingo = mock(BingoService.class);
+		inject(listener, "itemManager", items);
+		inject(listener, "rules", rules);
+		inject(listener, "pipeline", pipeline);
+		inject(listener, "bingo", bingo);
+
+		ItemStack stack = mock(ItemStack.class);
+		when(stack.getId()).thenReturn(1);
+		when(stack.getQuantity()).thenReturn(1);
+		ItemComposition item = mock(ItemComposition.class);
+		when(item.getName()).thenReturn("Yama unique");
+		when(item.isTradeable()).thenReturn(true);
+		when(items.getItemComposition(1)).thenReturn(item);
+		when(items.getItemPrice(1)).thenReturn(2_000_000);
+		when(rules.current()).thenReturn(new AnchorModels.Rules());
+		when(bingo.matchingItems(any(), any(), any())).thenReturn(Collections.emptyList());
+
+		NPCComposition yama = mock(NPCComposition.class);
+		when(yama.getId()).thenReturn(NpcID.YAMA);
+		when(yama.getName()).thenReturn("Yama");
+		ServerNpcLoot event = mock(ServerNpcLoot.class);
+		when(event.getComposition()).thenReturn(yama);
+		when(event.getItems()).thenReturn(Collections.singletonList(stack));
+
+		listener.onServerNpcLoot(event);
+
+		verify(pipeline).capture(eq("loot"), eq("yama unique"), any(AnchorModels.Source.class),
+			any(List.class), any(java.util.Map.class), eq(true));
 	}
 
 	private static void inject(Object target, String fieldName, Object value) throws Exception

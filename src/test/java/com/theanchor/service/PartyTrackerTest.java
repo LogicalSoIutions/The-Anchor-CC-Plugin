@@ -10,14 +10,17 @@ import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
 import net.runelite.api.Client;
+import net.runelite.api.IndexedObjectSet;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
+import net.runelite.api.WorldView;
 import net.runelite.api.clan.ClanMember;
 import net.runelite.api.clan.ClanSettings;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.widgets.Widget;
 import org.junit.Test;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.when;
 import static org.junit.Assert.*;
@@ -241,6 +244,35 @@ public class PartyTrackerTest
 		AnchorModels.Party party = tracker.snapshot("Nex");
 		assertEquals(2, party.detectedPartySize);
 		assertEquals("boss_interaction", party.method);
+	}
+
+	@Test public void yamaUsesInstancedWorldViewRoster() throws Exception
+	{
+		PartyTracker tracker = new PartyTracker();
+		Client client = mock(Client.class);
+		WorldView worldView = mock(WorldView.class);
+		@SuppressWarnings("unchecked") IndexedObjectSet<? extends Player> players =
+			(IndexedObjectSet<? extends Player>) mock(IndexedObjectSet.class);
+		Player local = mock(Player.class);
+		Player teammate = mock(Player.class);
+		when(local.getName()).thenReturn("Anchor One");
+		when(teammate.getName()).thenReturn("Anchor Two");
+		when(local.getWorldView()).thenReturn(worldView);
+		doReturn(players).when(worldView).players();
+		doReturn(List.of(local, teammate).iterator()).when(players).iterator();
+		when(local.isClanMember()).thenReturn(true);
+		when(teammate.isClanMember()).thenReturn(true);
+		when(client.getLocalPlayer()).thenReturn(local);
+		when(client.isInInstancedRegion()).thenReturn(true);
+		setField(tracker, "client", client);
+
+		AnchorModels.Party party = tracker.snapshot("Yama");
+
+		assertEquals(2, party.detectedPartySize);
+		assertEquals(2, party.detectedClanMemberCount);
+		assertEquals(List.of("Anchor One", "Anchor Two"), party.clanMemberNames);
+		assertEquals("instance_party", party.method);
+		assertEquals("high", party.confidence);
 	}
 
 	private static void setField(Object target, String name, Object value) throws Exception
