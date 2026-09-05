@@ -164,7 +164,6 @@ public class PetEventListener
 		details.put("obtained", !duplicate);
 		AnchorModels.Source source = currentBossSource();
 		String dedupeKey = petName == null ? message.toLowerCase(java.util.Locale.ROOT) : petName.toLowerCase(java.util.Locale.ROOT);
-		pipeline.capture("pet", dedupeKey, source, null, details, false);
 		List<AnchorModels.Item> petItems = petItems(petName);
 		List<Integer> petItemIds = new ArrayList<>();
 		for (AnchorModels.Item item : petItems) petItemIds.add(item.itemId);
@@ -174,6 +173,10 @@ public class PetEventListener
 			bingo.decorateDetails(bingoDetails);
 			pipeline.capture(bingo.eventType(), dedupeKey, source, petItems, bingoDetails, false,
 				bingo.rulesVersion(), bingo.screenshotRequired(), bingo.finalizeSubmission());
+		}
+		else
+		{
+			pipeline.capture("pet", dedupeKey, source, null, details, false);
 		}
 	}
 

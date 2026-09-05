@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.theanchor.evidence.EventPipeline;
@@ -77,6 +78,33 @@ public class PetEventListenerTest
 		verify(pipeline).capture(eq("pet"), eq("skotos"), isNull(), isNull(), details.capture(), eq(false));
 		assertEquals(Boolean.TRUE, details.getValue().get("duplicate"));
 		assertEquals(Boolean.FALSE, details.getValue().get("obtained"));
+	}
+
+	@Test public void capturesOnlyOneEventWhenPetMatchesBingo() throws Exception
+	{
+		PetEventListener listener = new PetEventListener();
+		EventPipeline pipeline = mock(EventPipeline.class);
+		BingoService bingo = mock(BingoService.class);
+		Client client = mock(Client.class);
+		Player player = mock(Player.class);
+		when(client.getLocalPlayer()).thenReturn(player);
+		when(player.getName()).thenReturn("Rutile");
+		when(bingo.shouldCapturePet(isNull(), isNull(), org.mockito.ArgumentMatchers.anyList())).thenReturn(true);
+		when(bingo.eventType()).thenReturn("bingo");
+		inject(listener, "pipeline", pipeline);
+		inject(listener, "bingo", bingo);
+		inject(listener, "client", client);
+
+		ChatMessage chat = mock(ChatMessage.class);
+		when(chat.getType()).thenReturn(ChatMessageType.CLAN_MESSAGE);
+		when(chat.getMessage()).thenReturn(
+			"Rutile has a funny feeling like he would have been followed: Skotos at 92 killcount from Skotizo.");
+
+		listener.onChatMessage(chat);
+
+		verify(pipeline).capture(eq("bingo"), eq("skotos"), isNull(), org.mockito.ArgumentMatchers.anyList(),
+			org.mockito.ArgumentMatchers.anyMap(), eq(false), isNull(), eq(false), eq(false));
+		verifyNoMoreInteractions(pipeline);
 	}
 
 	@Test public void ignoresNormalCollectionLogItems()
