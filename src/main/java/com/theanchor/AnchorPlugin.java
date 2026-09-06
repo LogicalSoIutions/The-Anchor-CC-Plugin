@@ -11,6 +11,7 @@ import com.theanchor.collection.CollectionLogSyncService;
 import com.theanchor.events.CollectionLogEventListener;
 import com.theanchor.events.CombatTierEventListener;
 import com.theanchor.events.LootEventListener;
+import com.theanchor.events.WeaponCreationEventListener;
 import com.theanchor.events.PetEventListener;
 import com.theanchor.pb.PersonalBestService;
 import com.theanchor.progress.PlayerProgressService;
@@ -87,6 +88,7 @@ public class AnchorPlugin extends Plugin
 	@Inject private BingoEventOverlay bingoEventOverlay;
 	@Inject private PartyTracker parties;
 	@Inject private LootEventListener loot;
+	@Inject private WeaponCreationEventListener weaponCreation;
 	@Inject private CollectionLogEventListener collectionLog;
 	@Inject private PetEventListener pets;
 	@Inject private CombatTierEventListener combatTiers;
@@ -107,7 +109,7 @@ public class AnchorPlugin extends Plugin
 		overlayManager.add(collectionLogSyncOverlay);
 		overlayManager.add(eventAlertOverlay);
 		overlayManager.add(bingoEventOverlay);
-		registered = Arrays.asList(parties, loot, collectionLog, collectionLogSync, pets, combatTiers, pbs);
+		registered = Arrays.asList(parties, loot, weaponCreation, collectionLog, collectionLogSync, pets, combatTiers, pbs);
 		data.addListener(connectionListener);
 		data.validate();
 		evidence.pruneUploaded(config.retentionDays());
@@ -211,6 +213,7 @@ public class AnchorPlugin extends Plugin
 		if (!featuresActive)
 		{
 			featuresActive = true;
+			weaponCreation.reset();
 			for (Object listener : registered) eventBus.register(listener);
 			collectionLogAutoSync.startUp();
 			collectionLogRefreshButton.startUp();
@@ -226,6 +229,7 @@ public class AnchorPlugin extends Plugin
 	{
 		if (!featuresActive) return;
 		featuresActive = false;
+		weaponCreation.reset();
 		if (registered != null) for (Object listener : registered) eventBus.unregister(listener);
 		collectionLogRefreshButton.shutDown();
 		collectionLogAutoSync.shutDown();

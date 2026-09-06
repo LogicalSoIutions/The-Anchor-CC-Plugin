@@ -66,8 +66,7 @@ public final class LootEligibility
 		Pattern.compile("aggy", Pattern.CASE_INSENSITIVE),
 		// Untradeable rare drops can have a low or zero GE price, but are still
 		// meaningful collection-log loot and should be captured on every drop.
-		Pattern.compile("elder venator fang", Pattern.CASE_INSENSITIVE),
-		Pattern.compile("noxious (?:point|blade|pommel)", Pattern.CASE_INSENSITIVE)
+		Pattern.compile("elder venator fang", Pattern.CASE_INSENSITIVE)
 	);
 
 	private LootEligibility() {}

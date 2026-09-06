@@ -60,13 +60,14 @@ public class LootEligibilityTest
 		assertTrue(LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
 	}
 
-	@Test public void capturesAllNoxiousHalberdPieces()
+	@Test public void weaponComponentsDoNotTriggerSpecialLootSubmissions()
 	{
-		for (String name : new String[] {"Noxious point", "Noxious blade", "Noxious pommel"})
+		for (String name : new String[] {"Noxious point", "Noxious blade", "Noxious pommel",
+			"Executioner's axe head", "Siren's staff", "Leviathan's lure", "Eye of the duke"})
 		{
 			AnchorModels.Item item = item(name, 0);
 			item.tradeable = false;
-			assertTrue(name, LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
+			assertFalse(name, LootEligibility.shouldCapture(item, new AnchorModels.Rules()));
 		}
 	}
 

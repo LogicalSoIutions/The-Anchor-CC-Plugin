@@ -72,7 +72,8 @@ public class EventPipeline
 		String partySource = source == null ? null : source.name;
 		if (partySource == null && details != null && details.get("record") instanceof AnchorModels.PbRecord)
 			partySource = ((AnchorModels.PbRecord) details.get("record")).activity;
-		boolean individualAward = isIndividualAward(type, partySource, details);
+		boolean individualAward = isIndividualAward(type, partySource, details)
+			|| ("loot".equals(type) && source != null && "creation".equals(source.type));
 		envelope.party = includeParty ? parties.snapshot(partySource, individualAward) : null;
 		// Collection-log notifications normally have no party metadata. Keep a
 		// provisional raid roster for a clog-only raid; prepareRaidGroup removes it
