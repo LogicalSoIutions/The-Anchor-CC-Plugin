@@ -63,6 +63,7 @@ import javax.swing.JViewport;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.game.SpriteManager;
@@ -96,6 +97,8 @@ public class AnchorPanel extends PluginPanel {
 	private final ItemManager itemManager;
 	private final Runnable dataListener = this::refreshOnEdt;
 	private final AtomicBoolean refreshQueued = new AtomicBoolean();
+	private boolean submissionsLoading;
+	private boolean submissionsReloadRequested;
 	private final JLabel banner = new AspectRatioIconLabel();
 	private final JLabel avatar = new JLabel();
 	private final JLabel identity = new JLabel("Log in to RuneLite", SwingConstants.LEFT);
@@ -578,15 +581,46 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private void rebuildSubmissions() {
+		if (submissionsLoading) {
+			submissionsReloadRequested = true;
+			return;
+		}
+		submissionsLoading = true;
+		new SwingWorker<List<EvidenceStore.Record>, Void>() {
+			@Override protected List<EvidenceStore.Record> doInBackground() {
+				return evidence.records();
+			}
+
+			@Override protected void done() {
+				submissionsLoading = false;
+				if (submissionsReloadRequested) {
+					submissionsReloadRequested = false;
+					rebuildSubmissions();
+					return;
+				}
+				try {
+					renderSubmissions(get());
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				} catch (java.util.concurrent.ExecutionException e) {
+					submissions.removeAll();
+					submissions.add(muted("Unable to load local submissions."));
+				}
+				submissions.revalidate();
+				submissions.repaint();
+			}
+		}.execute();
+	}
+
+	private void renderSubmissions(List<EvidenceStore.Record> records) {
 		submissions.removeAll();
-		List<EvidenceStore.Record> records = evidence.records();
 		if (records.isEmpty()) {
 			submissions.add(muted(
 					"Drops, personal bests, collection log entries, pets, and combat achievements will appear here."));
 			return;
 		}
-		for (EvidenceStore.Record record : groupedRecords(records)) {
-			List<EvidenceStore.Record> group = pipeline.groupRecords(record);
+		for (List<EvidenceStore.Record> group : submissionGroups(records).values()) {
+			EvidenceStore.Record record = preferredRecord(group);
 			AnchorModels.EventStatus displayStatus = groupStatus(group);
 			JPanel card = card();
 			card.add(submissionHeading(record, displayStatus, group));
@@ -635,7 +669,7 @@ public class AnchorPanel extends PluginPanel {
 			}
 			if (displayStatus == AnchorModels.EventStatus.FAILED || displayStatus == AnchorModels.EventStatus.PENDING) {
 				JButton retry = actionButton("Retry", true);
-				retry.addActionListener(e -> pipeline.retryGroup(record));
+				retry.addActionListener(e -> runSubmissionAction(() -> pipeline.retryGroup(record)));
 				actionButtons.add(retry);
 			}
 			if (displayStatus == AnchorModels.EventStatus.DRAFT && canFinalize(group)) {
@@ -648,7 +682,8 @@ public class AnchorPanel extends PluginPanel {
 						JOptionPane.showMessageDialog(this, "Clan and non-clan members cannot exceed party size.");
 						return;
 					}
-					pipeline.updateAndSubmitGroup(record, partySize, clanCount, nonClanCount, notes.getText());
+					String submissionNotes = notes.getText();
+					runSubmissionAction(() -> pipeline.updateAndSubmitGroup(record, partySize, clanCount, nonClanCount, submissionNotes));
 				});
 				actionButtons.add(submit);
 			}
@@ -656,8 +691,9 @@ public class AnchorPanel extends PluginPanel {
 			discard.addActionListener(e -> {
 				if (JOptionPane.showConfirmDialog(this, "Remove this local evidence?", "Discard",
 						JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-					for (EvidenceStore.Record member : group) evidence.deleteLocal(member.metadata.eventId);
-					refresh();
+					runSubmissionAction(() -> {
+						for (EvidenceStore.Record member : group) evidence.deleteLocal(member.metadata.eventId);
+					});
 				}
 			});
 			actionButtons.add(discard);
@@ -669,16 +705,34 @@ public class AnchorPanel extends PluginPanel {
 		}
 	}
 
-	private static List<EvidenceStore.Record> groupedRecords(List<EvidenceStore.Record> records) {
+	private void runSubmissionAction(Runnable action) {
+		new SwingWorker<Void, Void>() {
+			@Override protected Void doInBackground() {
+				action.run();
+				return null;
+			}
+
+			@Override protected void done() {
+				try {
+					get();
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				} catch (java.util.concurrent.ExecutionException e) {
+					JOptionPane.showMessageDialog(AnchorPanel.this, "Unable to update local submission.");
+				}
+				refresh();
+			}
+		}.execute();
+	}
+
+	private static java.util.Map<String, List<EvidenceStore.Record>> submissionGroups(List<EvidenceStore.Record> records) {
 		java.util.Map<String, List<EvidenceStore.Record>> groups = new java.util.LinkedHashMap<>();
 		for (EvidenceStore.Record record : records) {
 			String groupId = EventPipeline.submissionGroupId(record);
 			String key = groupId == null ? "event:" + record.metadata.eventId : "group:" + groupId;
 			groups.computeIfAbsent(key, ignored -> new java.util.ArrayList<>()).add(record);
 		}
-		List<EvidenceStore.Record> result = new java.util.ArrayList<>();
-		for (List<EvidenceStore.Record> group : groups.values()) result.add(preferredRecord(group));
-		return result;
+		return groups;
 	}
 
 	private static EvidenceStore.Record preferredRecord(List<EvidenceStore.Record> group) {

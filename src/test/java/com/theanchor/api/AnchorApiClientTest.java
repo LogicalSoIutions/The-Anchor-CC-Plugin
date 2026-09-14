@@ -41,6 +41,9 @@ public class AnchorApiClientTest
 			api.uploadEvent(new AnchorModels.EventEnvelope(), screenshot, "png", result -> { response[0] = result; latch.countDown(); });
 
 			assertTrue(latch.await(3, TimeUnit.SECONDS));
+			RecordedRequest upload = server.takeRequest(3, TimeUnit.SECONDS);
+			assertNotNull(upload);
+			assertTrue(upload.getBody().indexOf(okio.ByteString.of(Files.readAllBytes(screenshot))) >= 0);
 			assertTrue(response[0].isSuccessful());
 			assertEquals("submission-1", response[0].value.submissionId);
 			assertEquals("source.name", response[0].value.validationMessages.get(0).field);

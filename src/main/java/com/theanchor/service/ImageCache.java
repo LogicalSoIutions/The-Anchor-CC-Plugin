@@ -61,6 +61,11 @@ public class ImageCache
 
 	private void load(Path target, String url, long ttl, boolean revalidate, Consumer<BufferedImage> callback)
 	{
+		executor.execute(() -> loadInBackground(target, url, ttl, revalidate, callback));
+	}
+
+	private void loadInBackground(Path target, String url, long ttl, boolean revalidate, Consumer<BufferedImage> callback)
+	{
 		BufferedImage cached = read(target);
 		if (cached != null) callback.accept(cached);
 		boolean fresh = false;

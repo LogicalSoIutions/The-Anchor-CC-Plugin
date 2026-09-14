@@ -112,7 +112,7 @@ public class AnchorPlugin extends Plugin
 		registered = Arrays.asList(parties, loot, weaponCreation, collectionLog, collectionLogSync, pets, combatTiers, pbs);
 		data.addListener(connectionListener);
 		data.validate();
-		evidence.pruneUploaded(config.retentionDays());
+		executor.execute(() -> evidence.pruneUploaded(config.retentionDays()));
 		if (client.getGameState() == GameState.LOGGED_IN) onLoggedIn();
 		refreshTask = executor.scheduleAtFixedRate(this::runScheduledRefresh,
 			PROFILE_AND_COMPETITIONS_REFRESH_MINUTES,

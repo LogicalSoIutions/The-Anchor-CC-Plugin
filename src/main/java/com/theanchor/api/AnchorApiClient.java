@@ -122,10 +122,9 @@ public class AnchorApiClient
 			long screenshotBytes = 0;
 			if (screenshot != null)
 			{
-				byte[] bytes = Files.readAllBytes(screenshot);
-				screenshotBytes = bytes.length;
+				screenshotBytes = Files.size(screenshot);
 				MediaType imageType = MediaType.parse("image/" + ("jpg".equals(format) ? "jpeg" : format));
-				bodyBuilder.addFormDataPart("screenshot", screenshot.getFileName().toString(), RequestBody.create(imageType, bytes));
+				bodyBuilder.addFormDataPart("screenshot", screenshot.getFileName().toString(), RequestBody.create(imageType, screenshot.toFile()));
 			}
 			MultipartBody body = bodyBuilder.build();
 			Map<String, Object> journalPayload = new LinkedHashMap<>();

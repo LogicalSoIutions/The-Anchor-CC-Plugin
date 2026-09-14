@@ -29,7 +29,7 @@ public class EvidenceStore
 	@Inject public EvidenceStore(Gson gson) { this(gson, RuneLite.RUNELITE_DIR.toPath().resolve("the-anchor")); }
 	EvidenceStore(Gson gson, Path root) { this.gson = gson; this.root = root; }
 
-	public synchronized Record save(AnchorModels.EventEnvelope envelope, BufferedImage image) throws IOException
+	public Record save(AnchorModels.EventEnvelope envelope, BufferedImage image) throws IOException
 	{
 		ScreenshotEncoder.Encoded encoded = ScreenshotEncoder.encode(image);
 		LocalDate date = LocalDate.now();
@@ -79,7 +79,7 @@ public class EvidenceStore
 
 	public synchronized void deleteLocal(String eventId)
 	{
-		Record record = records().stream().filter(r -> eventId.equals(r.metadata.eventId)).findFirst().orElse(null);
+		Record record = read(root.resolve("outbox").resolve(eventId + ".json"));
 		try
 		{
 			if (record != null && record.screenshotPath != null) Files.deleteIfExists(Path.of(record.screenshotPath));

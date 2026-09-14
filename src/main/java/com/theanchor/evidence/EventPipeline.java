@@ -89,21 +89,25 @@ public class EventPipeline
 		envelope.context.put("submissionGroupId", group.id);
 		envelope.context.put("submissionTypes", group.types());
 		envelope.context.put("finalizeSubmission", finalizeSubmission);
-		refreshStoredGroup(group);
 		if (!screenshotRequired)
 		{
-			try
+			executor.execute(() ->
 			{
-				EvidenceStore.Record record = store.saveMetadata(envelope); notifyListeners();
-				group.captureFinished();
-				if (coordinatedRaidEvidence) queueRaidGroup(group);
-				else upload(record, false);
-			}
-			catch (Exception e)
-			{
-				group.captureFinished();
-				log.error("Could not save evidence metadata for event {} ({})", envelope.eventId, envelope.eventType, e);
-			}
+				try
+				{
+					refreshStoredGroup(group);
+					envelope.context.put("submissionTypes", group.types());
+					EvidenceStore.Record record = store.saveMetadata(envelope); notifyListeners();
+					group.captureFinished();
+					if (coordinatedRaidEvidence) queueRaidGroup(group);
+					else upload(record, false);
+				}
+				catch (Exception e)
+				{
+					group.captureFinished();
+					log.error("Could not save evidence metadata for event {} ({})", envelope.eventId, envelope.eventType, e);
+				}
+			});
 			return;
 		}
 		screenshots.captureNextFrame(image ->
@@ -116,6 +120,7 @@ public class EventPipeline
 			}
 			try
 			{
+				refreshStoredGroup(group);
 				envelope.context.put("submissionTypes", group.types());
 				EvidenceStore.Record record = store.save(envelope, image); notifyListeners();
 				group.captureFinished();
@@ -416,9 +421,10 @@ public class EventPipeline
 					result.error == null ? "empty server response" : result.error);
 				return;
 			}
+			List<EvidenceStore.Record> records = store.records();
 			for (AnchorModels.SubmissionSummary summary : result.value)
 			{
-				for (EvidenceStore.Record record : store.records())
+				for (EvidenceStore.Record record : records)
 				{
 					if ((summary.eventId != null && summary.eventId.equals(record.metadata.eventId))
 						|| (summary.submissionId != null && summary.submissionId.equals(record.submissionId)))
