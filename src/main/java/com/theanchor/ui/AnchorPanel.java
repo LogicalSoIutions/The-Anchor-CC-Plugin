@@ -600,9 +600,7 @@ public class AnchorPanel extends PluginPanel {
 				}
 				try {
 					renderSubmissions(get());
-				} catch (InterruptedException e) {
-					Thread.currentThread().interrupt();
-				} catch (java.util.concurrent.ExecutionException e) {
+				} catch (InterruptedException | java.util.concurrent.ExecutionException e) {
 					submissions.removeAll();
 					submissions.add(muted("Unable to load local submissions."));
 				}
@@ -715,9 +713,7 @@ public class AnchorPanel extends PluginPanel {
 			@Override protected void done() {
 				try {
 					get();
-				} catch (InterruptedException e) {
-					Thread.currentThread().interrupt();
-				} catch (java.util.concurrent.ExecutionException e) {
+				} catch (InterruptedException | java.util.concurrent.ExecutionException e) {
 					JOptionPane.showMessageDialog(AnchorPanel.this, "Unable to update local submission.");
 				}
 				refresh();
