@@ -21,7 +21,7 @@ import static org.mockito.Mockito.*;
 
 public class WeaponCreationEventListenerTest
 {
-	@Test public void detectsBothCompletedRecipes() throws Exception
+	@Test public void detectsCompletedRecipes() throws Exception
 	{
 		Fixture f = new Fixture();
 		f.inventory(halberdPieces());
@@ -33,6 +33,44 @@ public class WeaponCreationEventListenerTest
 			ItemID.SOULREAPER_AXE_STAFF, ItemID.SOULREAPER_AXE_LURE);
 		f.inventory(ItemID.SOULREAPER);
 		f.verifyCapture(ItemID.SOULREAPER, "soulreaper axe");
+
+		f = new Fixture();
+		f.inventory(ItemID.HYDRA_HEART, ItemID.HYDRA_EYE, ItemID.HYDRA_FANG);
+		f.inventory(ItemID.BRIMSTONE_RING);
+		f.inventory(ItemID.BRIMSTONE_RING);
+		f.verifyCapture(ItemID.BRIMSTONE_RING, "brimstone ring");
+		verifyNoMoreInteractions(f.pipeline);
+
+		f = new Fixture();
+		f.inventory(ItemID.TWINFLAME_PIECE_1, ItemID.TWINFLAME_PIECE_2, ItemID.BATTLESTAFF);
+		f.inventory(ItemID.TWINFLAME_STAFF);
+		f.inventory(ItemID.TWINFLAME_STAFF);
+		f.verifyCapture(ItemID.TWINFLAME_STAFF, "twinflame staff");
+		verifyNoMoreInteractions(f.pipeline);
+	}
+
+	@Test public void newRecipesRequireConsumptionOfEveryComponent() throws Exception
+	{
+		int[][] recipes = {
+			{ItemID.BRIMSTONE_RING, ItemID.HYDRA_HEART, ItemID.HYDRA_EYE, ItemID.HYDRA_FANG},
+			{ItemID.TWINFLAME_STAFF, ItemID.TWINFLAME_PIECE_1, ItemID.TWINFLAME_PIECE_2,
+				ItemID.BATTLESTAFF}
+		};
+		for (int[] recipe : recipes)
+		{
+			Fixture acquired = new Fixture();
+			acquired.inventory();
+			acquired.inventory(recipe[0]);
+			verifyNoInteractions(acquired.items, acquired.pipeline);
+
+			for (int component = 1; component < recipe.length; component++)
+			{
+				Fixture f = new Fixture();
+				f.inventory(recipe[1], recipe[2], recipe[3]);
+				f.inventory(recipe[0], recipe[component]);
+				verifyNoInteractions(f.items, f.pipeline);
+			}
+		}
 	}
 
 	@Test public void ordinaryUpdatesDoNotLookUpItemsOrCapture() throws Exception
@@ -127,6 +165,12 @@ public class WeaponCreationEventListenerTest
 			ItemComposition axe = mock(ItemComposition.class);
 			when(axe.getName()).thenReturn("Soulreaper axe");
 			when(items.getItemComposition(ItemID.SOULREAPER)).thenReturn(axe);
+			ItemComposition ring = mock(ItemComposition.class);
+			when(ring.getName()).thenReturn("Brimstone ring");
+			when(items.getItemComposition(ItemID.BRIMSTONE_RING)).thenReturn(ring);
+			ItemComposition staff = mock(ItemComposition.class);
+			when(staff.getName()).thenReturn("Twinflame staff");
+			when(items.getItemComposition(ItemID.TWINFLAME_STAFF)).thenReturn(staff);
 		}
 
 		void inventory(int... ids)

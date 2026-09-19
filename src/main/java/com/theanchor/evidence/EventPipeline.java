@@ -183,7 +183,6 @@ public class EventPipeline
 			? null : Path.of(record.screenshotPath);
 		executor.execute(() -> api.uploadEvent(record.metadata, screenshot, record.format, result ->
 		{
-			boolean autoSubmit = shouldAutoSubmit(record);
 			if (result.isSuccessful() && result.value != null)
 			{
 				record.submissionId = result.value.submissionId; record.status = parseStatus(result.value.status);
@@ -204,11 +203,10 @@ public class EventPipeline
 				}
 			}
 			record.updatedAt = Instant.now().toString(); persist(record);
-			if (autoSubmit && record.status == AnchorModels.EventStatus.DRAFT)
-			{
-				if (isCoordinatedRaidRecord(record)) maybeAutoSubmitRaidGroup(record);
-				else autoSubmit(record);
-			}
+			// Any completed raid upload can unblock another member, including team
+			// loot that needs manual review or loot the server already submitted.
+			if (isCoordinatedRaidRecord(record)) maybeAutoSubmitRaidGroup(record);
+			else if (record.status == AnchorModels.EventStatus.DRAFT && shouldAutoSubmit(record)) autoSubmit(record);
 		}));
 	}
 
@@ -291,7 +289,10 @@ public class EventPipeline
 		List<EvidenceStore.Record> records = groupRecords(groupId);
 		if (records.isEmpty()) return;
 		for (EvidenceStore.Record record : records)
-			if (record.status != AnchorModels.EventStatus.DRAFT) return;
+			if (record.status != AnchorModels.EventStatus.DRAFT
+				&& record.status != AnchorModels.EventStatus.SUBMITTED
+				&& record.status != AnchorModels.EventStatus.APPROVED
+				&& record.status != AnchorModels.EventStatus.REJECTED) return;
 
 		AnchorModels.Party party = null;
 		for (EvidenceStore.Record record : records)
@@ -310,7 +311,7 @@ public class EventPipeline
 
 		List<EvidenceStore.Record> eligible = new ArrayList<>();
 		for (EvidenceStore.Record record : records)
-			if (shouldAutoSubmit(record)) eligible.add(record);
+			if (record.status == AnchorModels.EventStatus.DRAFT && shouldAutoSubmit(record)) eligible.add(record);
 		if (eligible.isEmpty() || groupId == null || !raidGroupsBeingSubmitted.add(groupId)) return;
 		for (EvidenceStore.Record record : eligible) autoSubmit(record, party);
 	}
@@ -332,7 +333,7 @@ public class EventPipeline
 				&& record.metadata.party.submittedPartySize == 1
 				&& "high".equals(record.metadata.party.confidence);
 		}
-		if ("personal_best".equals(type) || "collection_log".equals(type))
+		if ("personal_best".equals(type) || "diary".equals(type) || "collection_log".equals(type))
 			return record.metadata.details != null
 				&& Boolean.TRUE.equals(record.metadata.details.get("autoSubmit"));
 		Object finalizeSubmission = record.metadata.context.get("finalizeSubmission");

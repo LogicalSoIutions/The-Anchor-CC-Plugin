@@ -99,6 +99,80 @@ public final class AnchorModels
 		public Competition previous;
 	}
 
+	/** Progress returned by the public PvM Diary status endpoint. */
+	public static final class PvmDiaryStatus
+	{
+		public int version;
+		public String catalogueVersion;
+		public String discordId;
+		public String fetchedAt;
+		public long earnedPoints;
+		public long totalPoints;
+		public int completedTiers;
+		public int totalTiers;
+		public PvmDiaryDelivery delivery;
+		public List<PvmDiaryCategory> categories = new ArrayList<>();
+		public List<PvmDiaryActivity> activities = new ArrayList<>();
+		public List<PvmDiarySubmission> pendingSubmissions = new ArrayList<>();
+	}
+
+	public static final class PvmDiaryDelivery
+	{
+		public long outstandingAwards;
+		public long outstandingDeductions;
+		public boolean reconciliationRequired;
+	}
+
+	public static final class PvmDiaryCategory
+	{
+		public String name;
+		public long earnedPoints;
+		public long totalPoints;
+		public int completedTiers;
+		public int totalTiers;
+	}
+
+	public static final class PvmDiaryActivity
+	{
+		public String id;
+		public String name;
+		public String category;
+		public int teamSize;
+		public String kind;
+		public List<PvmDiaryTier> tiers = new ArrayList<>();
+		public long earnedPoints;
+		public Long bestResult;
+		public PvmDiaryTier nextTarget;
+		public int pendingCount;
+	}
+
+	public static final class PvmDiaryTier
+	{
+		public String tier;
+		public Long target;
+		public long points;
+		public String targetLabel;
+		public boolean completed;
+	}
+
+	public static final class PvmDiarySubmission { }
+
+	/** Versioned, server-authoritative activity definitions for diary evidence. */
+	public static final class PvmDiaryContract
+	{
+		public int contractVersion;
+		public String catalogueVersion;
+		public List<PvmDiaryContractActivity> activities = new ArrayList<>();
+	}
+
+	public static final class PvmDiaryContractActivity
+	{
+		public String id;
+		public String kind;
+		public int teamSize;
+		public Integer invocation;
+	}
+
 	public static final class Competition
 	{
 		public long id;

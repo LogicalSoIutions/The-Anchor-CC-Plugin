@@ -115,6 +115,7 @@ public class AnchorPanel extends PluginPanel {
 	private boolean extraSettingsVisible;
 	private boolean botwExpanded = true;
 	private boolean sotwExpanded = true;
+	private boolean pvmDiaryExpanded = true;
 	private String activeTab = "Home";
 
 	@Inject
@@ -487,6 +488,201 @@ public class AnchorPanel extends PluginPanel {
 		home.add(competition("SOTW", competitions == null ? null : competitions.sotw,
 				authRequired ? data.unauthenticatedSotwImage() : data.sotwImage(),
 				standings == null ? null : standings.sotwRank, playerName, sotwExpanded));
+		home.add(Box.createVerticalStrut(8));
+		home.add(pvmDiary(data.pvmDiaryStatus(), pvmDiaryExpanded));
+	}
+
+	private JPanel pvmDiary(AnchorModels.PvmDiaryStatus diary, boolean expanded) {
+		JPanel card = card();
+		JButton toggle = actionButton((expanded ? "▾ " : "▸ ") + "PVM DIARY PROGRESS", false);
+		toggle.setHorizontalAlignment(SwingConstants.LEFT);
+		toggle.setToolTipText(expanded ? "Collapse PvM Diary progress" : "Expand PvM Diary progress");
+		toggle.addActionListener(e -> { pvmDiaryExpanded = !pvmDiaryExpanded; rebuildHome(); home.revalidate(); home.repaint(); });
+		toggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+		toggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, NAV_BUTTON_HEIGHT));
+		card.add(toggle);
+		if (!expanded) return card;
+		if (diary == null) {
+			card.add(Box.createVerticalStrut(5));
+			card.add(muted("Diary progress is currently unavailable"));
+			return card;
+		}
+		card.add(Box.createVerticalStrut(6));
+		card.add(diarySummary(diary));
+		card.add(Box.createVerticalStrut(4));
+		card.add(progress("Diary", diary.earnedPoints, Math.max(0, diary.totalPoints - diary.earnedPoints), PVM_ACCENT));
+		if (diary.delivery != null && (diary.delivery.outstandingAwards > 0 || diary.delivery.reconciliationRequired)) {
+			card.add(Box.createVerticalStrut(4));
+			String message = diary.delivery.reconciliationRequired ? "Points delivery needs reconciliation"
+					: number(diary.delivery.outstandingAwards) + " points awaiting delivery";
+			card.add(muted(message));
+		}
+		if (diary.categories != null && !diary.categories.isEmpty()) {
+			card.add(Box.createVerticalStrut(7));
+			card.add(centeredDiaryHeading("CATEGORIES"));
+			for (AnchorModels.PvmDiaryCategory category : diary.categories) {
+				card.add(Box.createVerticalStrut(3));
+				card.add(diaryCategoryRow(category));
+			}
+		}
+		return card;
+	}
+
+	private static JPanel diarySummary(AnchorModels.PvmDiaryStatus diary) {
+		JPanel summary = new JPanel(new GridLayout(1, 2, 8, 0));
+		summary.setOpaque(false);
+		summary.setAlignmentX(Component.LEFT_ALIGNMENT);
+		summary.setMaximumSize(new Dimension(PANEL_WIDTH, 34));
+		summary.add(diaryMetric("PVM EARNED", number(diary.earnedPoints) + " / " + number(diary.totalPoints), PVM_ACCENT));
+		summary.add(diaryMetric("TIERS", diary.completedTiers + " / " + diary.totalTiers, SOTW_ACCENT));
+		return summary;
+	}
+
+	private static JPanel diaryMetric(String title, String amount, Color color) {
+		JPanel metric = new JPanel(new GridLayout(2, 1));
+		metric.setOpaque(false);
+		JLabel label = new JLabel(title, SwingConstants.CENTER);
+		label.setForeground(new Color(145, 148, 151));
+		label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
+		JLabel value = new JLabel(amount, SwingConstants.CENTER);
+		value.setForeground(color);
+		value.setFont(value.getFont().deriveFont(Font.BOLD, 14f));
+		metric.add(label);
+		metric.add(value);
+		return metric;
+	}
+
+	private static JLabel centeredDiaryHeading(String text) {
+		JLabel heading = competitionSectionHeading(text, SCORE_COLOR);
+		heading.setHorizontalAlignment(SwingConstants.CENTER);
+		heading.setMaximumSize(new Dimension(PANEL_WIDTH, heading.getPreferredSize().height));
+		return heading;
+	}
+
+	private JPanel diaryCategoryRow(AnchorModels.PvmDiaryCategory category) {
+		JPanel row = new JPanel(new GridLayout(1, 3, 4, 0));
+		row.setOpaque(false);
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(PANEL_WIDTH, 20));
+		row.add(diaryCategoryLabel(value(category.name), Color.WHITE));
+		JButton tiers = actionButton(category.completedTiers + " / " + category.totalTiers + " tiers", false);
+		tiers.setForeground(SOTW_ACCENT);
+		tiers.setToolTipText("View " + value(category.name) + " tier details");
+		tiers.setPreferredSize(new Dimension(0, 20));
+		tiers.setMargin(new Insets(0, 2, 0, 2));
+		tiers.addActionListener(e -> showDiaryCategoryDetails(category));
+		row.add(tiers);
+		row.add(diaryCategoryLabel(number(category.earnedPoints) + " / " + number(category.totalPoints), PVM_ACCENT));
+		return row;
+	}
+
+	private static JLabel diaryCategoryLabel(String text, Color color) {
+		JLabel label = new JLabel(text, SwingConstants.CENTER);
+		label.setForeground(color);
+		label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
+		return label;
+	}
+
+	private void showDiaryCategoryDetails(AnchorModels.PvmDiaryCategory category) {
+		AnchorModels.PvmDiaryStatus diary = data.pvmDiaryStatus();
+		if (diary == null || diary.activities == null) return;
+		Window owner = SwingUtilities.getWindowAncestor(this);
+		// Keep the diary visible while allowing the player to return to the game.
+		JDialog dialog = new JDialog(owner, value(category.name) + " PvM Diary", Dialog.ModalityType.MODELESS);
+		dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+		dialog.setLayout(new BorderLayout());
+		dialog.getContentPane().setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+		JPanel header = new JPanel(new BorderLayout(8, 0));
+		header.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		header.setBorder(BorderFactory.createEmptyBorder(10, 12, 8, 12));
+		JLabel title = new JLabel(value(category.name).toUpperCase(Locale.ROOT) + " · PVM DIARY");
+		title.setForeground(SCORE_COLOR);
+		title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
+		JLabel total = new JLabel(category.completedTiers + " / " + category.totalTiers + " tiers · "
+				+ number(category.earnedPoints) + " / " + number(category.totalPoints) + " points", SwingConstants.RIGHT);
+		total.setForeground(new Color(190, 193, 196));
+		header.add(title, BorderLayout.WEST);
+		header.add(total, BorderLayout.EAST);
+		dialog.add(header, BorderLayout.NORTH);
+
+		JPanel details = verticalPanel();
+		details.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		boolean found = false;
+		for (AnchorModels.PvmDiaryActivity activity : diary.activities) {
+			if (!value(category.name).equals(activity.category)) continue;
+			if (found) details.add(Box.createVerticalStrut(6));
+			details.add(diaryActivityDetails(activity));
+			found = true;
+		}
+		if (!found) details.add(muted("No activity details are available yet."));
+		JScrollPane detailsScroll = scroll(details);
+		int detailsHeight = Math.min(420, Math.max(110, details.getPreferredSize().height + 8));
+		detailsScroll.setPreferredSize(new Dimension(460, detailsHeight));
+		dialog.add(detailsScroll, BorderLayout.CENTER);
+
+		JPanel footer = new JPanel(new BorderLayout());
+		footer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		footer.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+		JButton close = actionButton("Close", false);
+		close.addActionListener(e -> dialog.dispose());
+		footer.add(close, BorderLayout.EAST);
+		dialog.add(footer, BorderLayout.SOUTH);
+		dialog.setMinimumSize(new Dimension(400, 180));
+		dialog.pack();
+		dialog.setLocationRelativeTo(this);
+		dialog.setVisible(true);
+	}
+
+	private static JPanel diaryActivityDetails(AnchorModels.PvmDiaryActivity activity) {
+		JPanel card = card();
+		JPanel heading = new JPanel(new BorderLayout(8, 0));
+		heading.setOpaque(false);
+		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
+		JLabel name = new JLabel(value(activity.name));
+		name.setForeground(Color.WHITE);
+		name.setFont(name.getFont().deriveFont(Font.BOLD, 13f));
+		JLabel score = new JLabel(number(activity.earnedPoints) + " points", SwingConstants.RIGHT);
+		score.setForeground(PVM_ACCENT);
+		score.setFont(score.getFont().deriveFont(Font.BOLD, 12f));
+		heading.add(name, BorderLayout.CENTER);
+		heading.add(score, BorderLayout.EAST);
+		card.add(heading);
+		card.add(Box.createVerticalStrut(3));
+		card.add(muted("Best: " + diaryBestResult(activity)));
+		for (AnchorModels.PvmDiaryTier tier : activity.tiers) {
+			card.add(Box.createVerticalStrut(2));
+			card.add(diaryTierRow(tier));
+		}
+		if (activity.pendingCount > 0) {
+			card.add(Box.createVerticalStrut(3));
+			card.add(muted(activity.pendingCount + " submission" + (activity.pendingCount == 1 ? "" : "s") + " pending review"));
+		}
+		return card;
+	}
+
+	private static JPanel diaryTierRow(AnchorModels.PvmDiaryTier tier) {
+		JPanel row = new JPanel(new GridLayout(1, 3, 4, 0));
+		row.setOpaque(false);
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(PANEL_WIDTH, 20));
+		row.add(diaryCategoryLabel(value(tier.tier).toUpperCase(Locale.ROOT), tier.completed ? CONNECTED_COLOR : new Color(170, 173, 176)));
+		row.add(diaryCategoryLabel(value(tier.targetLabel), Color.WHITE));
+		String points = tier.points == 0 ? "—" : "+" + number(tier.points);
+		row.add(diaryCategoryLabel((tier.completed ? "✓ " : "") + points, tier.completed ? CONNECTED_COLOR : SCORE_COLOR));
+		return row;
+	}
+
+	private static String diaryBestResult(AnchorModels.PvmDiaryActivity activity) {
+		if (activity.bestResult == null) return "—";
+		if ("wave".equals(activity.kind)) return "Wave " + number(activity.bestResult);
+		if ("completion".equals(activity.kind)) return "Complete";
+		long totalSeconds = Math.max(0, activity.bestResult / 1000);
+		long hours = totalSeconds / 3600;
+		long minutes = (totalSeconds % 3600) / 60;
+		long seconds = totalSeconds % 60;
+		return hours > 0 ? String.format(Locale.ROOT, "%d:%02d:%02d", hours, minutes, seconds)
+				: String.format(Locale.ROOT, "%d:%02d", minutes, seconds);
 	}
 
 	static boolean requiresCompetitionAuthentication(AnchorDataService.Connection connection) {

@@ -20,14 +20,16 @@ import net.runelite.api.gameval.ItemID;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 
-/** Detect assembly only when the finished weapon replaces all of its components. */
+/** Detect assembly only when the finished item replaces all of its components. */
 @Singleton
 public class WeaponCreationEventListener
 {
-	// Each weapon is followed by its components in the reusable count buffers.
+	// Each finished item is followed by its components in the reusable count buffers.
 	private static final int HALBERD = 0;
 	private static final int AXE = 4;
-	private static final int TRACKED_ITEMS = 9;
+	private static final int RING = 9;
+	private static final int STAFF = 13;
+	private static final int TRACKED_ITEMS = 17;
 	@Inject private Client client;
 	@Inject private ItemManager itemManager;
 	@Inject private EventPipeline pipeline;
@@ -53,7 +55,9 @@ public class WeaponCreationEventListener
 			if (index >= 0 && item.getQuantity() > 0) current[index] += item.getQuantity();
 		}
 		int halberds = hasBaseline ? createdQuantity(HALBERD, AXE, previous, current) : 0;
-		int axes = hasBaseline ? createdQuantity(AXE, TRACKED_ITEMS, previous, current) : 0;
+		int axes = hasBaseline ? createdQuantity(AXE, RING, previous, current) : 0;
+		int rings = hasBaseline ? createdQuantity(RING, STAFF, previous, current) : 0;
+		int staves = hasBaseline ? createdQuantity(STAFF, TRACKED_ITEMS, previous, current) : 0;
 		// Swap buffers before capture; login/activation only establishes a baseline.
 		int[] spare = previous;
 		previous = current;
@@ -61,6 +65,8 @@ public class WeaponCreationEventListener
 		hasBaseline = true;
 		if (halberds > 0) capture(ItemID.NOXIOUS_HALBERD, halberds);
 		if (axes > 0) capture(ItemID.SOULREAPER, axes);
+		if (rings > 0) capture(ItemID.BRIMSTONE_RING, rings);
+		if (staves > 0) capture(ItemID.TWINFLAME_STAFF, staves);
 	}
 
 	private static int trackedIndex(int itemId)
@@ -76,15 +82,23 @@ public class WeaponCreationEventListener
 			case ItemID.SOULREAPER_AXE_EYE: return 6;
 			case ItemID.SOULREAPER_AXE_STAFF: return 7;
 			case ItemID.SOULREAPER_AXE_LURE: return 8;
+			case ItemID.BRIMSTONE_RING: return RING;
+			case ItemID.HYDRA_HEART: return 10;
+			case ItemID.HYDRA_EYE: return 11;
+			case ItemID.HYDRA_FANG: return 12;
+			case ItemID.TWINFLAME_STAFF: return STAFF;
+			case ItemID.TWINFLAME_PIECE_1: return 14;
+			case ItemID.TWINFLAME_PIECE_2: return 15;
+			case ItemID.BATTLESTAFF: return 16;
 			default: return -1;
 		}
 	}
 
-	private static int createdQuantity(int weapon, int end, int[] before, int[] after)
+	private static int createdQuantity(int finishedItem, int end, int[] before, int[] after)
 	{
-		int gained = after[weapon] - before[weapon];
+		int gained = after[finishedItem] - before[finishedItem];
 		if (gained <= 0) return 0;
-		for (int component = weapon + 1; component < end; component++)
+		for (int component = finishedItem + 1; component < end; component++)
 			if (before[component] - after[component] < gained) return 0;
 		return gained;
 	}

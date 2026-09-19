@@ -27,6 +27,7 @@ public class AnchorDataService
 	private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
 	private volatile AnchorModels.Profile profile;
 	private volatile AnchorModels.CompetitionPanels competitionPanels;
+	private volatile AnchorModels.PvmDiaryStatus pvmDiaryStatus;
 	private volatile BufferedImage profileImage;
 	private volatile BufferedImage botwImage;
 	private volatile BufferedImage sotwImage;
@@ -43,6 +44,7 @@ public class AnchorDataService
 	public void removeListener(Runnable listener) { listeners.remove(listener); }
 	public AnchorModels.Profile profile() { return profile; }
 	public AnchorModels.CompetitionPanels competitionPanels() { return competitionPanels; }
+	public AnchorModels.PvmDiaryStatus pvmDiaryStatus() { return pvmDiaryStatus; }
 	public BufferedImage profileImage() { return profileImage; }
 	public BufferedImage botwImage() { return botwImage; }
 	public BufferedImage sotwImage() { return sotwImage; }
@@ -57,6 +59,7 @@ public class AnchorDataService
 		requestedPlayerName = null;
 		currentPlayerClanMember = false;
 		profile = null;
+		pvmDiaryStatus = null;
 		profileImage = null;
 		message = "Log in to load your Anchor profile";
 		notifyListeners();
@@ -70,6 +73,7 @@ public class AnchorDataService
 		{
 			profile = null;
 			profileImage = null;
+			pvmDiaryStatus = null;
 			currentPlayerClanMember = false;
 		}
 		requestedPlayerName = requestedName;
@@ -89,6 +93,7 @@ public class AnchorDataService
 				message = currentPlayerClanMember ? "Profile loaded" : "Not found in The Anchor roster";
 				if (currentPlayerClanMember)
 				{
+					loadPvmDiaryStatus(profile.member == null ? null : profile.member.discordId, requestedName);
 					String url = profileImageUrl(playerName);
 					images.loadProfile(playerName, url, image ->
 					{
@@ -165,6 +170,17 @@ public class AnchorDataService
 	{
 		loadCompetitionImage("botw", panels == null ? null : panels.botw);
 		loadCompetitionImage("sotw", panels == null ? null : panels.sotw);
+	}
+
+	private void loadPvmDiaryStatus(String discordId, String playerName)
+	{
+		if (discordId == null || discordId.isBlank()) { pvmDiaryStatus = null; return; }
+		api.getPvmDiaryStatus(discordId, result ->
+		{
+			if (!samePlayer(requestedPlayerName, playerName)) return;
+			pvmDiaryStatus = result.isSuccessful() ? result.value : null;
+			notifyListeners();
+		});
 	}
 
 	static boolean samePlayer(String first, String second)

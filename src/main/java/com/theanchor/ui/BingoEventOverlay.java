@@ -40,7 +40,7 @@ public class BingoEventOverlay extends OverlayPanel
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (!config.bingoOverlayEnabled()) return null;
+		if (!config.bingoOverlayEnabled() || config.bingoOverlayScreenshotOnly()) return null;
 		AnchorModels.BingoEvent event = bingo.current();
 		if (event == null || !event.active) return null;
 		Color color = config.bingoOverlayTextColor() == null ? Color.WHITE : config.bingoOverlayTextColor();

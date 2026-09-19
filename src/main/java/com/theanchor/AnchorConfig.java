@@ -94,6 +94,11 @@ public interface AnchorConfig extends Config
 		section = BINGO_OVERLAY, position = 0)
 	default boolean bingoOverlayEnabled() { return true; }
 
+	@ConfigItem(keyName = "bingoOverlayScreenshotOnly", name = "Screenshot only",
+		description = "Show the enabled Bingo overlay only in captured evidence screenshots",
+		section = BINGO_OVERLAY, position = 2)
+	default boolean bingoOverlayScreenshotOnly() { return false; }
+
 	@ConfigItem(keyName = "bingoOverlayTextColor", name = "Text Color",
 		description = "Choose the text color used by the active event overlay",
 		section = BINGO_OVERLAY, position = 1)

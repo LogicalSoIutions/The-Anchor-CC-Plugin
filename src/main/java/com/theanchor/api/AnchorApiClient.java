@@ -100,6 +100,16 @@ public class AnchorApiClient
 		get("/api/competitions/panels", false, AnchorModels.CompetitionPanels.class, callback);
 	}
 
+	public void getPvmDiaryStatus(String discordId, ResultCallback<AnchorModels.PvmDiaryStatus> callback)
+	{
+		get("/api/pvm-diary/status?discord_id=" + encode(discordId), false, AnchorModels.PvmDiaryStatus.class, callback);
+	}
+
+	public void getPvmDiaryContract(ResultCallback<AnchorModels.PvmDiaryContract> callback)
+	{
+		get("/api/runelite/pvm-diary/contract", true, AnchorModels.PvmDiaryContract.class, callback);
+	}
+
 	public void validateSession(ResultCallback<Map> callback) { get("/api/runelite/session", true, Map.class, callback); }
 	public void getRules(ResultCallback<AnchorModels.Rules> callback) { get("/api/runelite/rules", true, AnchorModels.Rules.class, callback); }
 	public void getBingo(ResultCallback<AnchorModels.BingoEvent> callback)

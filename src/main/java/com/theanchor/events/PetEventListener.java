@@ -7,6 +7,7 @@ package com.theanchor.events;
 import com.theanchor.evidence.EventPipeline;
 import com.theanchor.model.AnchorModels;
 import com.theanchor.service.BingoService;
+import com.theanchor.service.BossRegistry;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -20,6 +21,7 @@ import net.runelite.api.Client;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.NPC;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.GameTick;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.util.Text;
@@ -29,9 +31,11 @@ import net.runelite.http.api.item.ItemPrice;
 public class PetEventListener
 {
 	private static final Pattern PATTERN = Pattern.compile("^You (?:have a funny feeling like you(?:'|’)re being followed(?: by (.+?))?|have a funny feeling like you would have been followed|feel something weird sneaking into your backpack)(?:\\s*:\\s*(.+?))?[.!…]*$", Pattern.CASE_INSENSITIVE);
-	private static final Pattern NAMED_FOLLOWED_PATTERN = Pattern.compile("^(?:[^\\w\\s]*)?(?<user>[\\w\\s]+?) has a funny feeling like .+? (?:would have been followed|being followed):\\s*(?<pet>.+?)(?:\\s+at\\s+.+?)?(?:\\s+from\\s+.+?)?[.!…]*$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern NAMED_PET_PATTERN = Pattern.compile("^(?:[^\\w\\s]*)?(?<user>[\\w\\s]+?) (?:has a funny feeling like .+? (?:would have been followed|being followed)|feels something weird sneaking into .+? backpack):\\s*(?<pet>.+?)(?:\\s+at\\s+.+?)?(?:\\s+from\\s+.+?)?[.!…]*$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern UNTRADEABLE_DROP_PATTERN = Pattern.compile("^Untradeable drop:\\s*(.+?)(?:\\s+(?:\\(\\d+\\)|\\[\\d+\\]))?[.!…]*$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern COLLECTION_LOG_PATTERN = Pattern.compile("New item added to your collection log:\\s*(.+)", Pattern.CASE_INSENSITIVE);
+	private static final Pattern KILL_COUNT_PATTERN = Pattern.compile("^Your (.+?) (?:kill|chest|completion) count is: [\\d,]+[.!]?$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern CLAN_SOURCE_PATTERN = Pattern.compile("\\s+from\\s+(.+?)[.!…]*$", Pattern.CASE_INSENSITIVE);
 	@Inject private EventPipeline pipeline;
 	@Inject private BingoService bingo;
 	@Inject private Client client;
@@ -40,19 +44,46 @@ public class PetEventListener
 	private long pendingPetAt;
 	private String recentCollectionItem;
 	private long recentCollectionAt;
+	private AnchorModels.Source recentBossSource;
+	private long recentBossAt;
+	private String recentNamedPet;
+	private long recentNamedPetAt;
+
+	@Subscribe public void onGameTick(GameTick event)
+	{
+		if (pendingPetMessage != null && System.currentTimeMillis() - pendingPetAt > 5000L)
+		{
+			// Duplicate rolls may never produce a collection-log or named clan message.
+			String message = pendingPetMessage;
+			pendingPetMessage = null;
+			AnchorModels.Source source = currentBossSource();
+			String petName = PetItems.forBoss(source == null ? null : source.name);
+			capturePet(message, petName == null ? "Unknown pet" : normalizePetName(petName));
+		}
+	}
 
 	@Subscribe public void onChatMessage(ChatMessage event)
 	{
 		boolean gameMessage = event.getType() == ChatMessageType.GAMEMESSAGE || event.getType() == ChatMessageType.SPAM;
 		boolean clanMessage = isClanNotification(event.getType());
 		if (!gameMessage && !clanMessage) return;
-		String message = Text.removeTags(event.getMessage());
-		Matcher namedMatcher = NAMED_FOLLOWED_PATTERN.matcher(message);
+		String message = Text.removeTags(event.getMessage()).replace('\u00a0', ' ').trim();
+		Matcher killMatcher = KILL_COUNT_PATTERN.matcher(message);
+		if (gameMessage && killMatcher.matches())
+		{
+			rememberBoss(killMatcher.group(1));
+			return;
+		}
+		Matcher namedMatcher = NAMED_PET_PATTERN.matcher(message);
 		if (clanMessage)
 		{
 			if (!namedMatcher.find() || !isLocalPlayer(namedMatcher.group("user"))) return;
 			String petName = normalizePetName(namedMatcher.group("pet"));
+			Matcher sourceMatcher = CLAN_SOURCE_PATTERN.matcher(message);
+			if (sourceMatcher.find()) rememberBoss(sourceMatcher.group(1));
 			long now = System.currentTimeMillis();
+			recentNamedPet = petName;
+			recentNamedPetAt = now;
 			if (pendingPetMessage != null && now - pendingPetAt <= 5000L)
 			{
 				capturePet(pendingPetMessage, petName);
@@ -65,6 +96,7 @@ public class PetEventListener
 				// from creating a second pet submission.
 				capturePet(message, petName);
 			}
+			pendingPetMessage = null;
 			return;
 		}
 		Matcher untradeableMatcher = UNTRADEABLE_DROP_PATTERN.matcher(message);
@@ -89,7 +121,9 @@ public class PetEventListener
 		Matcher collectionMatcher = COLLECTION_LOG_PATTERN.matcher(message);
 		if (collectionMatcher.find())
 		{
-			recentCollectionItem = collectionMatcher.group(1).trim();
+			String itemName = collectionMatcher.group(1).trim();
+			if (!PetItems.isPet(itemName)) return;
+			recentCollectionItem = itemName;
 			recentCollectionAt = System.currentTimeMillis();
 			if (pendingPetMessage != null && recentCollectionAt - pendingPetAt <= 5000L)
 			{
@@ -103,15 +137,20 @@ public class PetEventListener
 		boolean standardNotification = matcher.find();
 		String petName = standardNotification
 			? normalizePetName(firstNonBlank(matcher.group(1), matcher.group(2)))
-			: namedFollowedPet(message);
+			: namedPet(message);
 		if (petName != null && !petName.isBlank())
 		{
 			capturePet(message, petName);
 			return;
 		}
-		if (standardNotification || NAMED_FOLLOWED_PATTERN.matcher(message).find())
+		if (standardNotification || NAMED_PET_PATTERN.matcher(message).find())
 		{
-			if (recentCollectionItem != null && System.currentTimeMillis() - recentCollectionAt <= 5000L)
+			if (recentNamedPet != null && System.currentTimeMillis() - recentNamedPetAt <= 5000L)
+			{
+				// The local player's named clan notification already captured this roll.
+				return;
+			}
+			else if (recentCollectionItem != null && System.currentTimeMillis() - recentCollectionAt <= 5000L)
 			{
 				capturePet(message, recentCollectionItem);
 				recentCollectionItem = null;
@@ -133,7 +172,7 @@ public class PetEventListener
 			String petName = firstNonBlank(matcher.group(1), matcher.group(2));
 			if (petName != null) return normalizePetName(petName);
 		}
-		matcher = NAMED_FOLLOWED_PATTERN.matcher(message);
+		matcher = NAMED_PET_PATTERN.matcher(message);
 		if (matcher.find()) return normalizePetName(matcher.group("pet"));
 		matcher = UNTRADEABLE_DROP_PATTERN.matcher(message);
 		if (matcher.find())
@@ -150,9 +189,9 @@ public class PetEventListener
 		return null;
 	}
 
-	private String namedFollowedPet(String message)
+	private String namedPet(String message)
 	{
-		Matcher matcher = NAMED_FOLLOWED_PATTERN.matcher(message);
+		Matcher matcher = NAMED_PET_PATTERN.matcher(message);
 		return matcher.find() ? normalizePetName(matcher.group("pet")) : null;
 	}
 
@@ -205,7 +244,7 @@ public class PetEventListener
 	{
 		if (username == null || client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null) return false;
 		String cleaned = username.replaceFirst("^[^\\w\\s]+", "").trim();
-		return cleaned.equalsIgnoreCase(client.getLocalPlayer().getName());
+		return cleaned.equalsIgnoreCase(client.getLocalPlayer().getName().replace('\u00a0', ' ').trim());
 	}
 
 	static boolean isClanNotification(ChatMessageType type)
@@ -218,6 +257,8 @@ public class PetEventListener
 
 	private AnchorModels.Source currentBossSource()
 	{
+		if (recentBossSource != null && System.currentTimeMillis() - recentBossAt <= 10_000L)
+			return recentBossSource;
 		if (client.getLocalPlayer() == null) return null;
 		Actor actor = client.getLocalPlayer().getInteracting();
 		if (!(actor instanceof NPC)) return null;
@@ -225,6 +266,14 @@ public class PetEventListener
 		AnchorModels.Source source = new AnchorModels.Source();
 		source.type = "npc"; source.id = npc.getId(); source.name = npc.getName();
 		return source;
+	}
+
+	private void rememberBoss(String name)
+	{
+		recentBossSource = new AnchorModels.Source();
+		recentBossSource.type = BossRegistry.isRaid(name) ? "event" : "npc";
+		recentBossSource.name = name;
+		recentBossAt = System.currentTimeMillis();
 	}
 
 	private List<AnchorModels.Item> petItems(String petName)

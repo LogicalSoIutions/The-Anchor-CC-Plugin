@@ -5,16 +5,22 @@
 package com.theanchor.evidence;
 
 import com.theanchor.AnchorConfig;
+import com.theanchor.model.AnchorModels;
+import com.theanchor.service.BingoService;
+import java.awt.Color;
 import java.awt.Image;
 import java.awt.Insets;
 import java.awt.Point;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
+import net.runelite.api.Player;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -28,6 +34,7 @@ public class ScreenshotService
 {
 	@Inject private Client client;
 	@Inject private AnchorConfig config;
+	@Inject private BingoService bingo;
 	@Inject private ClientUI clientUi;
 	@Inject private ClientThread clientThread;
 	@Inject private DrawManager drawManager;
@@ -36,11 +43,31 @@ public class ScreenshotService
 
 	public void captureNextFrame(Consumer<BufferedImage> callback)
 	{
+		// Snapshot identity and event data on the client thread, before asynchronous capture.
+		Player player = client.getLocalPlayer();
+		String rsn = player == null || player.getName() == null ? "Unknown player" : player.getName();
+		String[] lines = { rsn };
+		Color color = Color.WHITE;
+		AnchorModels.BingoEvent event = bingo.current();
+		if (config.bingoOverlayEnabled() && config.bingoOverlayScreenshotOnly() && event != null && event.active)
+		{
+			AnchorModels.BingoTeam team = bingo.currentTeam();
+			String title = event.eventTitle == null || event.eventTitle.isBlank() ? "Bingo Event" : event.eventTitle;
+			String teamName = team == null || team.teamName == null || team.teamName.isBlank() ? "Unassigned" : team.teamName;
+			lines = new String[] { rsn, title, teamName,
+				LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM d, yyyy  h:mm a")) };
+			if (config.bingoOverlayTextColor() != null) color = config.bingoOverlayTextColor();
+		}
+		String[] capturedLines = lines;
+		Color capturedColor = color;
 		boolean hidden = hidePrivateMessages();
 		drawManager.requestNextFrameListener(frame ->
 		{
-			executor.execute(() -> callback.accept(frame(frame)));
-			restorePrivateMessages(hidden);
+			try
+			{
+				executor.execute(() -> callback.accept(ScreenshotOverlay.render(frame(frame), capturedLines, capturedColor)));
+			}
+			finally { restorePrivateMessages(hidden); }
 		});
 	}
 

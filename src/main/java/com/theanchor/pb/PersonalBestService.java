@@ -69,6 +69,7 @@ public class PersonalBestService
 	@Inject private ConfigManager configManager;
 	@Inject private AnchorApiClient api;
 	@Inject private EventPipeline pipeline;
+	@Inject private PvmDiaryContractService diaryContract;
 	private final Map<String, Double> known = new HashMap<>();
 	private volatile String status = "Never synced";
 	private String lastFingerprint;
@@ -82,17 +83,21 @@ public class PersonalBestService
 	{
 		pendingSpecialActivity = null;
 		hydrateKnown();
+		diaryContract.refresh();
 	}
 
 	@Subscribe public void onConfigChanged(ConfigChanged event)
 	{
-		if (!GROUP.equals(event.getGroup()) || event.getNewValue() == null || isAmbiguous(event.getKey())) return;
+		if (!GROUP.equals(event.getGroup()) || event.getNewValue() == null) return;
+		// Do not defer raw raid or internally-named activity keys to the
+		// Adventure Log: that widget only loads when a player opens it, which
+		// left their new diary result undetected.
 		double seconds; try { seconds = Double.parseDouble(event.getNewValue()); } catch (NumberFormatException e) { return; }
-		AnchorModels.PbRecord record = fromKey(event.getKey(), seconds);
+		AnchorModels.PbRecord record = diaryRecordFromKey(event.getKey(), seconds);
 		String key = recordKey(record);
 		Double previous = known.put(key, seconds);
 		if (previous != null && seconds >= previous) return;
-		sync(java.util.Collections.singletonList(record), false, true, previous);
+		sync(java.util.Collections.singletonList(record), false, true, previous, false, event.getKey());
 	}
 
 	@Subscribe public void onChatMessage(ChatMessage event)
@@ -118,7 +123,7 @@ public class PersonalBestService
 		String key = recordKey(record);
 		Double previous = known.put(key, seconds);
 		if (previous != null && seconds >= previous) return;
-		sync(java.util.Collections.singletonList(record), false, true, previous);
+		sync(java.util.Collections.singletonList(record), false, true, previous, false, pending);
 	}
 
 	static String specialActivityFromKillCount(String message)
@@ -209,7 +214,7 @@ public class PersonalBestService
 		Double seconds = raw == null ? null : parseTime(raw); if (!title.toLowerCase(Locale.ROOT).contains(scoreboard.boss.toLowerCase(Locale.ROOT)) || seconds == null) return;
 		String key = scoreboard.boss + (title.toLowerCase(Locale.ROOT).contains("awakened") ? " (awakened)" : "");
 		Double previous = known.put(key, seconds); if (previous != null && seconds >= previous) return;
-		sync(java.util.Collections.singletonList(fromKey(key, seconds)), false, true, previous);
+		sync(java.util.Collections.singletonList(fromKey(key, seconds)), false, true, previous, false, key);
 	}
 
 	private static Scoreboard scoreboardFor(int groupId)
@@ -238,7 +243,7 @@ public class PersonalBestService
 		for (String key : configManager.getRSProfileConfigurationKeys(GROUP, profile, ""))
 		{
 			Double seconds = configManager.getRSProfileConfiguration(GROUP, key, double.class);
-			if (seconds != null && !isAmbiguous(key)) records.add(fromKey(key, seconds));
+			if (seconds != null) records.add(diaryRecordFromKey(key, seconds));
 		}
 		String fingerprint = fingerprint(records);
 		if (!force && fingerprint.equals(lastFingerprint)) { status = "PBs already up to date"; return; }
@@ -247,10 +252,16 @@ public class PersonalBestService
 
 	private void sync(List<AnchorModels.PbRecord> records, boolean bulk, boolean evidence, Double previous)
 	{
-		sync(records, bulk, evidence, previous, false);
+		sync(records, bulk, evidence, previous, false, null);
 	}
 
 	private void sync(List<AnchorModels.PbRecord> records, boolean bulk, boolean evidence, Double previous, boolean fromAdventureLog)
+	{
+		sync(records, bulk, evidence, previous, fromAdventureLog, null);
+	}
+
+	private void sync(List<AnchorModels.PbRecord> records, boolean bulk, boolean evidence, Double previous,
+		boolean fromAdventureLog, String rawKey)
 	{
 		if ((!bulk && records.isEmpty()) || client.getLocalPlayer() == null) return;
 		if (fromAdventureLog)
@@ -283,9 +294,24 @@ public class PersonalBestService
 		});
 		if (evidence)
 		{
-			AnchorModels.PbRecord record = records.get(0); Map<String, Object> details = new HashMap<>(); details.put("record", record); details.put("autoSubmit", true); if (previous != null) details.put("previousDurationMillis", Math.round(previous * 1000));
-			// Team size is already part of PbRecord when RuneLite provides it. PB evidence never needs loot-split metadata.
-			pipeline.capture("personal_best", record.activity + '|' + record.durationMillis, null, null, details, false);
+			AnchorModels.PbRecord record = records.get(0);
+			Map<String, Object> details = new HashMap<>();
+			details.put("record", record);
+			details.put("autoSubmit", true);
+			if (previous != null) details.put("previousDurationMillis", Math.round(previous * 1000));
+			String sourceId = UUID.randomUUID().toString();
+			Map<String, Object> diaryDetails = diaryContract.detailsFor(record, rawKey, sourceId);
+			if (diaryDetails != null)
+			{
+				details.putAll(diaryDetails);
+				pipeline.capture("diary", recordKey(record) + '|' + record.durationMillis, null, null, details, false);
+			}
+			else
+			{
+				// A generic PB remains a normal PB when mode, exact party size,
+				// invocation, or result type cannot be proven from the capture.
+				pipeline.capture("personal_best", recordKey(record) + '|' + record.durationMillis, null, null, details, false);
+			}
 		}
 	}
 
@@ -300,9 +326,9 @@ public class PersonalBestService
 		for (String key : configManager.getRSProfileConfigurationKeys(GROUP, profile, ""))
 		{
 			Double value = configManager.getRSProfileConfiguration(GROUP, key, double.class);
-			if (value != null && !isAmbiguous(key))
+			if (value != null)
 			{
-				AnchorModels.PbRecord record = fromKey(key, value);
+				AnchorModels.PbRecord record = diaryRecordFromKey(key, value);
 				known.put(recordKey(record), value);
 			}
 		}
@@ -325,6 +351,33 @@ public class PersonalBestService
 		else if (lower.contains("expert")) record.variant = "expert";
 		else if (lower.contains("entry")) record.variant = "entry";
 		else if (lower.contains("hard")) record.variant = "hard";
+		return record;
+	}
+
+	/**
+	 * The raw personalbest config is updated immediately when a run completes.
+	 * Unlike the Adventure Log, it uses a few internal labels, so normalize
+	 * those labels before sending a diary event. This also preserves the raid
+	 * mode and team-size detail needed to match a diary activity.
+	 */
+	static AnchorModels.PbRecord diaryRecordFromKey(String key, double seconds)
+	{
+		AnchorModels.PbRecord record = fromKey(key, seconds);
+		String lower = key == null ? "" : key.toLowerCase(Locale.ROOT);
+		if (lower.equals("sol heredit")) record.activity = "Fortis Colosseum";
+		else if (lower.equals("tztok-jad")) record.activity = "TzHaar Fight Cave";
+		else if (lower.equals("tzkal-zuk")) record.activity = "Inferno";
+		else if (lower.equals("corrupted gauntlet")) record.activity = "Corrupted Gauntlet";
+		else if (lower.equals("gauntlet")) record.activity = "Gauntlet";
+		else if (lower.equals("hueycoatl")) record.activity = "Hueycoatl";
+
+		if (lower.startsWith("chambers of xeric")) record.activity = "Chambers of Xeric";
+		else if (lower.startsWith("theatre of blood")) record.activity = "Theatre of Blood";
+		else if (lower.startsWith("tombs of amascut")) record.activity = "Tombs of Amascut";
+		if (lower.contains("challenge mode")) record.variant = "challenge_mode";
+		else if (lower.contains("hard mode")) record.variant = "hard";
+		else if (lower.contains("entry mode")) record.variant = "entry";
+		if (record.teamSize == null && lower.matches(".*\\bsolo$")) record.teamSize = 1;
 		return record;
 	}
 

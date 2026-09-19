@@ -43,6 +43,18 @@ public class PersonalBestServiceTest
 		assertNull(PersonalBestService.parseTime("bad"));
 	}
 
+	@Test public void normalizesPreviouslyDeferredDiaryActivities()
+	{
+		AnchorModels.PbRecord fortis = PersonalBestService.diaryRecordFromKey("sol heredit", 1_234.5);
+		assertEquals("Fortis Colosseum", fortis.activity);
+
+		AnchorModels.PbRecord raid = PersonalBestService.diaryRecordFromKey(
+			"chambers of xeric challenge mode 3 players", 1_234.5);
+		assertEquals("Chambers of Xeric", raid.activity);
+		assertEquals("challenge_mode", raid.variant);
+		assertEquals(Integer.valueOf(3), raid.teamSize);
+	}
+
 	@Test public void detectsFightCavesAndInfernoKillCountMessages()
 	{
 		assertEquals("TzHaar Fight Cave", PersonalBestService.specialActivityFromKillCount(
@@ -69,21 +81,24 @@ public class PersonalBestServiceTest
 		Player player = mock(Player.class);
 		AnchorApiClient api = mock(AnchorApiClient.class);
 		EventPipeline pipeline = mock(EventPipeline.class);
+		PvmDiaryContractService diaryContract = mock(PvmDiaryContractService.class);
+		when(diaryContract.detailsFor(any(), anyString(), anyString())).thenReturn(null);
 		when(client.getLocalPlayer()).thenReturn(player);
 		when(player.getName()).thenReturn("LogicalMash");
 		when(client.getAccountHash()).thenReturn(123L);
 		inject(service, "client", client);
 		inject(service, "api", api);
 		inject(service, "pipeline", pipeline);
+		inject(service, "diaryContract", diaryContract);
 
 		service.onChatMessage(chat("Your TzTok-Jad kill count is: 18."));
 		service.onChatMessage(chat("Duration: 30:18.60 (new personal best)"));
 		service.onChatMessage(chat("Your TzKal-Zuk kill count is: 7."));
 		service.onChatMessage(chat("Duration: 1:01:30.20 (new personal best)"));
 
-		verify(pipeline).capture(eq("personal_best"), eq("TzHaar Fight Cave|1818600"),
+		verify(pipeline).capture(eq("personal_best"), eq("TzHaar Fight Cave|null|null|overall|null|1818600"),
 			isNull(), isNull(), anyMap(), eq(false));
-		verify(pipeline).capture(eq("personal_best"), eq("Inferno|3690200"),
+		verify(pipeline).capture(eq("personal_best"), eq("Inferno|null|null|overall|null|3690200"),
 			isNull(), isNull(), anyMap(), eq(false));
 		verify(api, times(2)).syncPbs(any(AnchorModels.PbBulkRequest.class), eq(false), any());
 	}
