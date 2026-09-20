@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
@@ -169,10 +170,12 @@ public class AnchorApiClient
 		postJson("/api/runelite/collection-log", request, Map.class, callback);
 	}
 
-	public void updateSubmission(String id, int partySize, int clanMembers, int nonClanMembers, String notes, ResultCallback<Map> callback)
+	public void updateSubmission(String id, int partySize, int clanMembers, int nonClanMembers,
+		List<AnchorModels.PartyMember> partyMembers, String notes, ResultCallback<Map> callback)
 	{
 		postJsonWithMethod("/api/runelite/submissions/" + encode(id), Map.of("submittedPartySize", partySize,
-			"submittedClanMemberCount", clanMembers, "submittedNonClanMemberCount", nonClanMembers, "notes", notes),
+			"submittedClanMemberCount", clanMembers, "submittedNonClanMemberCount", nonClanMembers,
+			"submittedPartyMembers", partyMembers == null ? List.of() : partyMembers, "notes", notes),
 			"PATCH", Map.class, callback);
 	}
 

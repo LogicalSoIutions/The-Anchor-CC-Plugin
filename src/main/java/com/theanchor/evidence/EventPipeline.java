@@ -179,11 +179,12 @@ public class EventPipeline
 				upload(member, true);
 	}
 
-	public void updateAndSubmitGroup(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers, String notes)
+	public void updateAndSubmitGroup(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers,
+		List<AnchorModels.PartyMember> partyMembers, String notes)
 	{
 		for (EvidenceStore.Record member : groupRecords(record))
 			if (member.status == AnchorModels.EventStatus.DRAFT)
-				updateAndSubmit(member, partySize, clanMembers, nonClanMembers, notes);
+				updateAndSubmit(member, partySize, clanMembers, nonClanMembers, partyMembers, notes);
 	}
 
 	public void upload(EvidenceStore.Record record, boolean manual)
@@ -383,10 +384,12 @@ public class EventPipeline
 		int partySize = party == null ? 1 : party.submittedPartySize;
 		int clanMembers = party == null ? 0 : party.submittedClanMemberCount;
 		int nonClanMembers = party == null ? 0 : party.submittedNonClanMemberCount;
-		updateAndSubmit(record, partySize, clanMembers, nonClanMembers, "");
+		updateAndSubmit(record, partySize, clanMembers, nonClanMembers,
+			party == null ? List.of() : party.submittedMembers, "");
 	}
 
-	public void updateAndSubmit(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers, String notes)
+	public void updateAndSubmit(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers,
+		List<AnchorModels.PartyMember> partyMembers, String notes)
 	{
 		if (record.submissionId == null)
 		{
@@ -401,7 +404,15 @@ public class EventPipeline
 		int size = Math.max(1, partySize);
 		int clan = Math.max(0, Math.min(size, clanMembers));
 		int nonClan = Math.max(0, Math.min(size - clan, nonClanMembers));
-		api.updateSubmission(record.submissionId, size, clan, nonClan, notes == null ? "" : notes, patched ->
+		List<AnchorModels.PartyMember> members = copyPartyMembers(partyMembers);
+		if (record.metadata.party != null)
+		{
+			record.metadata.party.submittedPartySize = size;
+			record.metadata.party.submittedClanMemberCount = clan;
+			record.metadata.party.submittedNonClanMemberCount = nonClan;
+			record.metadata.party.submittedMembers = members;
+		}
+		api.updateSubmission(record.submissionId, size, clan, nonClan, members, notes == null ? "" : notes, patched ->
 		{
 			if (!patched.isSuccessful())
 			{
@@ -514,6 +525,21 @@ public class EventPipeline
 			if (normalized.startsWith("tombsofamascut")) return "tombsofamascut";
 		}
 		return normalized;
+	}
+
+	private static List<AnchorModels.PartyMember> copyPartyMembers(List<AnchorModels.PartyMember> source)
+	{
+		List<AnchorModels.PartyMember> copy = new ArrayList<>();
+		if (source == null) return copy;
+		for (AnchorModels.PartyMember member : source)
+		{
+			if (member == null) continue;
+			AnchorModels.PartyMember value = new AnchorModels.PartyMember();
+			value.name = member.name == null ? "" : member.name.trim();
+			value.clanMember = member.clanMember;
+			copy.add(value);
+		}
+		return copy;
 	}
 
 	private static boolean isRaidSource(String source)

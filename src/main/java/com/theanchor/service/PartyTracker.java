@@ -473,6 +473,9 @@ public class PartyTracker
 					party.detectedClanMemberCount++;
 					AnchorModels.PartyMember value = new AnchorModels.PartyMember();
 					value.name = member.name; value.clanMember = true; party.members.add(value);
+					AnchorModels.PartyMember submitted = new AnchorModels.PartyMember();
+					submitted.name = value.name; submitted.clanMember = value.clanMember;
+					party.submittedMembers.add(submitted);
 					if (party.detectedPartySize > 1) party.clanMemberNames.add(member.name);
 				}
 				else if (Boolean.FALSE.equals(member.clanMember)) party.detectedNonClanMemberCount++;

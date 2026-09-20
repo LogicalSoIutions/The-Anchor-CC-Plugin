@@ -50,6 +50,7 @@ import javax.swing.BoxLayout;
 import javax.swing.ImageIcon;
 import javax.swing.Icon;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -510,7 +511,7 @@ public class AnchorPanel extends PluginPanel {
 		card.add(Box.createVerticalStrut(6));
 		card.add(diarySummary(diary));
 		card.add(Box.createVerticalStrut(4));
-		card.add(progress("Diary", diary.earnedPoints, Math.max(0, diary.totalPoints - diary.earnedPoints), PVM_ACCENT));
+		card.add(progress("Diary", diary.earnedPoints, Math.max(0, diary.totalPoints - diary.earnedPoints), PVM_ACCENT, false));
 		if (diary.delivery != null && (diary.delivery.outstandingAwards > 0 || diary.delivery.reconciliationRequired)) {
 			card.add(Box.createVerticalStrut(4));
 			String message = diary.delivery.reconciliationRequired ? "Points delivery needs reconciliation"
@@ -564,7 +565,10 @@ public class AnchorPanel extends PluginPanel {
 		row.setOpaque(false);
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.setMaximumSize(new Dimension(PANEL_WIDTH, 20));
-		row.add(diaryCategoryLabel(value(category.name), Color.WHITE));
+		String categoryName = value(category.name);
+		JLabel categoryLabel = diaryCategoryLabel(compactDiaryCategoryName(categoryName), Color.WHITE);
+		categoryLabel.setToolTipText(categoryName);
+		row.add(categoryLabel);
 		JButton tiers = actionButton(category.completedTiers + " / " + category.totalTiers + " tiers", false);
 		tiers.setForeground(SOTW_ACCENT);
 		tiers.setToolTipText("View " + value(category.name) + " tier details");
@@ -581,6 +585,10 @@ public class AnchorPanel extends PluginPanel {
 		label.setForeground(color);
 		label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
 		return label;
+	}
+
+	private static String compactDiaryCategoryName(String name) {
+		return "Corrupted Gauntlet".equalsIgnoreCase(name) ? "CG" : name;
 	}
 
 	private void showDiaryCategoryDetails(AnchorModels.PvmDiaryCategory category) {
@@ -834,13 +842,16 @@ public class AnchorPanel extends PluginPanel {
 			JTextField notes = new JTextField();
 			notes.setToolTipText("Optional submission notes");
 			notes.setMaximumSize(new Dimension(Integer.MAX_VALUE, notes.getPreferredSize().height));
-			// PB records may have legacy party metadata, but party splits only apply to
-			// qualifying loot.
-			if (record.metadata.party != null && !isPersonalBest(record)) {
+			PartyMemberEditor partyMemberEditor = record.metadata.party == null ? null
+					: new PartyMemberEditor(record.metadata.party);
+			if (record.metadata.party != null) {
 				card.add(Box.createVerticalStrut(4));
 				card.add(fieldRow("Party size", party));
 				card.add(fieldRow("Clan members", clanMembers));
 				card.add(fieldRow("Non-clan members", nonClanMembers));
+				JButton editParty = actionButton("Edit party members", false);
+				editParty.addActionListener(e -> partyMemberEditor.show(party, clanMembers, nonClanMembers));
+				card.add(editParty);
 				card.add(muted("Detected via " + friendlyMethod(record.metadata.party.method)));
 				int unknown = Math.max(0, record.metadata.party.detectedPartySize
 						- record.metadata.party.detectedClanMemberCount
@@ -879,7 +890,10 @@ public class AnchorPanel extends PluginPanel {
 						return;
 					}
 					String submissionNotes = notes.getText();
-					runSubmissionAction(() -> pipeline.updateAndSubmitGroup(record, partySize, clanCount, nonClanCount, submissionNotes));
+					List<AnchorModels.PartyMember> partyMembers = partyMemberEditor == null ? List.of()
+							: partyMemberEditor.members();
+					runSubmissionAction(() -> pipeline.updateAndSubmitGroup(record, partySize, clanCount, nonClanCount,
+							partyMembers, submissionNotes));
 				});
 				actionButtons.add(submit);
 			}
@@ -979,10 +993,12 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private static String partyMemberNames(AnchorModels.Party party) {
-		if (party == null || party.members == null || party.members.isEmpty())
+		List<AnchorModels.PartyMember> members = party == null ? List.of()
+				: party.submittedMembers == null || party.submittedMembers.isEmpty() ? party.members : party.submittedMembers;
+		if (members.isEmpty())
 			return "";
 		StringBuilder names = new StringBuilder("Party: ");
-		for (AnchorModels.PartyMember member : party.members) {
+		for (AnchorModels.PartyMember member : members) {
 			if (member == null || member.name == null || member.name.isBlank())
 				continue;
 			if (names.length() > 7)
@@ -992,6 +1008,97 @@ public class AnchorPanel extends PluginPanel {
 				names.append(Boolean.TRUE.equals(member.clanMember) ? " [clan]" : " [guest]");
 		}
 		return names.length() == 7 ? "" : names.toString();
+	}
+
+	private final class PartyMemberEditor {
+		private final List<AnchorModels.PartyMember> members = new java.util.ArrayList<>();
+
+		PartyMemberEditor(AnchorModels.Party party) {
+			List<AnchorModels.PartyMember> source = party.submittedMembers == null || party.submittedMembers.isEmpty()
+					? party.members : party.submittedMembers;
+			for (AnchorModels.PartyMember member : source) members.add(copyPartyMember(member));
+		}
+
+		void show(JSpinner partySize, JSpinner clanMembers, JSpinner nonClanMembers) {
+			JSpinner size = new JSpinner(new SpinnerNumberModel(((Integer) partySize.getValue()).intValue(), 1, 100, 1));
+			JPanel roster = verticalPanel();
+			size.addChangeListener(e -> rebuildRoster(roster, (Integer) size.getValue()));
+			rebuildRoster(roster, (Integer) size.getValue());
+			JPanel content = verticalPanel();
+			content.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+			content.add(fieldRow("Party size", size));
+			content.add(Box.createVerticalStrut(5));
+			content.add(label("Members", false));
+			JScrollPane scroll = scroll(roster);
+			scroll.setPreferredSize(new Dimension(360, 190));
+			content.add(scroll);
+			int choice = JOptionPane.showConfirmDialog(AnchorPanel.this, content, "Edit party members",
+					JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+			if (choice != JOptionPane.OK_OPTION) return;
+			readRoster(roster);
+			partySize.setValue(size.getValue());
+			int clan = 0, nonClan = 0;
+			for (AnchorModels.PartyMember member : members) {
+				if (Boolean.TRUE.equals(member.clanMember)) clan++;
+				else if (Boolean.FALSE.equals(member.clanMember)) nonClan++;
+			}
+			clanMembers.setValue(clan);
+			nonClanMembers.setValue(nonClan);
+		}
+
+		List<AnchorModels.PartyMember> members() {
+			List<AnchorModels.PartyMember> copy = new java.util.ArrayList<>();
+			for (AnchorModels.PartyMember member : members) copy.add(copyPartyMember(member));
+			return copy;
+		}
+
+		private void rebuildRoster(JPanel roster, int count) {
+			readRoster(roster);
+			while (members.size() < count) members.add(new AnchorModels.PartyMember());
+			while (members.size() > count) members.remove(members.size() - 1);
+			roster.removeAll();
+			for (int index = 0; index < members.size(); index++) {
+				AnchorModels.PartyMember member = members.get(index);
+				JPanel row = new JPanel(new BorderLayout(5, 0));
+				row.setOpaque(false);
+				JTextField name = new JTextField(member.name == null ? "" : member.name);
+				name.putClientProperty("partyIndex", index);
+				name.setToolTipText("RuneScape name");
+				JComboBox<String> role = new JComboBox<>(new String[] { "Unknown", "Clan", "Guest" });
+				role.setSelectedItem(Boolean.TRUE.equals(member.clanMember) ? "Clan"
+						: Boolean.FALSE.equals(member.clanMember) ? "Guest" : "Unknown");
+				role.putClientProperty("partyIndex", index);
+				row.add(new JLabel((index + 1) + "."), BorderLayout.WEST);
+				row.add(name, BorderLayout.CENTER);
+				row.add(role, BorderLayout.EAST);
+				roster.add(row);
+				if (index < members.size() - 1) roster.add(Box.createVerticalStrut(3));
+			}
+			roster.revalidate(); roster.repaint();
+		}
+
+		private void readRoster(JPanel roster) {
+			for (Component component : roster.getComponents()) {
+				if (!(component instanceof JPanel)) continue;
+				for (Component field : ((JPanel) component).getComponents()) {
+					Object index = field instanceof javax.swing.JComponent
+							? ((javax.swing.JComponent) field).getClientProperty("partyIndex") : null;
+					if (!(index instanceof Integer) || (Integer) index >= members.size()) continue;
+					AnchorModels.PartyMember member = members.get((Integer) index);
+					if (field instanceof JTextField) member.name = ((JTextField) field).getText().trim();
+					if (field instanceof JComboBox) {
+						String role = String.valueOf(((JComboBox<?>) field).getSelectedItem());
+						member.clanMember = "Clan".equals(role) ? Boolean.TRUE : "Guest".equals(role) ? Boolean.FALSE : null;
+					}
+				}
+			}
+		}
+
+		private AnchorModels.PartyMember copyPartyMember(AnchorModels.PartyMember source) {
+			AnchorModels.PartyMember copy = new AnchorModels.PartyMember();
+			if (source != null) { copy.name = source.name; copy.clanMember = source.clanMember; }
+			return copy;
+		}
 	}
 
 	private JPanel submissionHeading(EvidenceStore.Record record, AnchorModels.EventStatus displayStatus,
@@ -1405,6 +1512,10 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private static JPanel progress(String name, long current, long remaining, Color accent) {
+		return progress(name, current, remaining, accent, true);
+	}
+
+	private static JPanel progress(String name, long current, long remaining, Color accent, boolean showRemaining) {
 		JPanel p = verticalPanel();
 		p.setOpaque(false);
 		p.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -1421,7 +1532,7 @@ public class AnchorPanel extends PluginPanel {
 		bar.setFont(bar.getFont().deriveFont(Font.BOLD, 11f));
 		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
 		p.add(bar);
-		p.add(muted(number(remaining) + " remaining"));
+		if (showRemaining) p.add(muted(number(remaining) + " remaining"));
 		return p;
 	}
 

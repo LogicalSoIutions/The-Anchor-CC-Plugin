@@ -297,6 +297,8 @@ public final class AnchorModels
 		/** Same-clan RSNs involved in a multi-player encounter; guest RSNs are never included. */
 		public List<String> clanMemberNames = new ArrayList<>();
 		public List<PartyMember> members = new ArrayList<>();
+		/** Roster confirmed or corrected by the player before the submission is sent. */
+		public List<PartyMember> submittedMembers = new ArrayList<>();
 		public String method = "unknown";
 		public String confidence = "low";
 	}

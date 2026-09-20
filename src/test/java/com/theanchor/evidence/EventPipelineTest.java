@@ -79,10 +79,10 @@ public class EventPipelineTest
 			return null;
 		}).when(api).uploadEvent(any(), any(), any(), any());
 		doAnswer(call -> {
-			AnchorApiClient.ResultCallback<Map> callback = call.getArgument(5);
+			AnchorApiClient.ResultCallback<Map> callback = call.getArgument(6);
 			callback.complete(AnchorApiClient.ApiResult.ok(200, new HashMap<>()));
 			return null;
-		}).when(api).updateSubmission(anyString(), anyInt(), anyInt(), anyInt(), anyString(), any());
+		}).when(api).updateSubmission(anyString(), anyInt(), anyInt(), anyInt(), anyList(), anyString(), any());
 
 		pipeline.upload(loot, true);
 		pipeline.upload(clog, true);
@@ -93,11 +93,11 @@ public class EventPipelineTest
 		completeUpload(callbacks.get(second), second, lootFirst ? "draft" : lootStatus);
 		if (enabled && !"failed".equals(lootStatus))
 		{
-			verify(api).updateSubmission(eq("collection_log-id"), eq(3), eq(2), eq(1), eq(""), any());
+			verify(api).updateSubmission(eq("collection_log-id"), eq(3), eq(2), eq(1), anyList(), eq(""), any());
 			verify(api).submit(eq("collection_log-id"), any());
 		}
 		else verify(api, never()).submit(anyString(), any());
-		verify(api, never()).updateSubmission(eq("loot-id"), anyInt(), anyInt(), anyInt(), anyString(), any());
+		verify(api, never()).updateSubmission(eq("loot-id"), anyInt(), anyInt(), anyInt(), anyList(), anyString(), any());
 	}
 
 	private static EvidenceStore.Record raidRecord(String type)
