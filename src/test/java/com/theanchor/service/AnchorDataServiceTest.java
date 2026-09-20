@@ -80,6 +80,7 @@ public class AnchorDataServiceTest
 		AnchorApiClient api = mock(AnchorApiClient.class);
 		AnchorModels.Profile profile = new AnchorModels.Profile();
 		profile.member = new AnchorModels.Member();
+		profile.member.discordId = "284148696017403905";
 		inject(service, "api", api);
 		inject(service, "images", mock(ImageCache.class));
 		inject(service, "rules", mock(RulesService.class));
@@ -94,6 +95,7 @@ public class AnchorDataServiceTest
 
 		assertTrue(service.isCurrentPlayerClanMember());
 		assertEquals(profile, service.profile());
+		verify(api).getPvmDiaryStatus(eq("Zach"), any());
 	}
 
 	private static AnchorModels.CompetitionPair pairWithUpcoming(long id, String metric)

@@ -135,15 +135,18 @@ public class AnchorApiClientTest
 			server.enqueue(new MockResponse().setResponseCode(200).setBody(
 				"{\"earnedPoints\":125,\"totalPoints\":3000,\"completedTiers\":2,\"totalTiers\":62,"
 					+ "\"categories\":[{\"name\":\"COX\",\"completedTiers\":2,\"totalTiers\":9}],"
-					+ "\"activities\":[{\"name\":\"COX solo\",\"category\":\"COX\",\"nextTarget\":{\"targetLabel\":\"17:00\"}}]}"));
+					+ "\"activities\":[{\"name\":\"COX solo\",\"category\":\"COX\","
+					+ "\"bestResult\":{\"value\":870000,\"label\":\"14:30\"},"
+					+ "\"nextTarget\":{\"targetLabel\":\"17:00\"}}]}"));
 			server.start();
 			AnchorApiClient api = new AnchorApiClient(new OkHttpClient(), new Gson(), mock(AnchorConfig.class), server.url("/").toString());
 			CountDownLatch latch = new CountDownLatch(1);
 			final AnchorModels.PvmDiaryStatus[] status = new AnchorModels.PvmDiaryStatus[1];
-			api.getPvmDiaryStatus("284148696017403905", result -> { status[0] = result.value; latch.countDown(); });
+			api.getPvmDiaryStatus("Logical Hash", result -> { status[0] = result.value; latch.countDown(); });
 			assertTrue(latch.await(3, TimeUnit.SECONDS));
-			assertEquals("/api/pvm-diary/status?discord_id=284148696017403905", server.takeRequest().getPath());
+			assertEquals("/api/pvm-diary/status?rsn=Logical%20Hash", server.takeRequest().getPath());
 			assertEquals(125, status[0].earnedPoints);
+			assertEquals(Long.valueOf(870000L), status[0].activities.get(0).bestResult.value);
 			assertEquals("17:00", status[0].activities.get(0).nextTarget.targetLabel);
 		}
 	}

@@ -7,6 +7,7 @@ package com.theanchor.pb;
 import com.theanchor.api.AnchorApiClient;
 import com.theanchor.evidence.EventPipeline;
 import com.theanchor.model.AnchorModels;
+import com.theanchor.service.PartyTracker;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -27,8 +28,11 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -44,11 +48,25 @@ public class PersonalBestService
 	private static final Pattern RECORD = Pattern.compile("^Fastest (?<descriptor>.+): (?<value>-|[0-9:]+(?:\\.[0-9]+)?)$");
 	private static final Pattern TEAM = Pattern.compile("(\\d+)\\+? player", Pattern.CASE_INSENSITIVE);
 	private static final Pattern SPECIAL_ACTIVITY_KILL_COUNT = Pattern.compile(
-		"^Your (?<boss>TzTok-Jad|TzKal-Zuk) kill count is: [0-9,]+\\.?$", Pattern.CASE_INSENSITIVE);
+		"^Your (?<boss>TzTok-Jad|TzKal-Zuk|Sol Heredit|(?:The )?Corrupted Gauntlet) "
+			+ "(?:kill |completion )?count is: [0-9,]+\\.?$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern NEW_PB_DURATION = Pattern.compile(
 		"^Duration:?\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)\\.?\\s*\\(new personal best\\)\\.?$",
 		Pattern.CASE_INSENSITIVE);
+	private static final Pattern COX_COMPLETION = Pattern.compile(
+		"Team size:\\s*(?<team>[1-9][0-9]*|Solo)\\s*(?:players?)?\\s+Duration:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)"
+			+ "(?:\\s+Personal best:\\s*[0-9:]+(?:\\.[0-9]+)?|\\s*\\(new personal best\\))"
+			+ "(?:\\s+Olm duration:.*)?$",
+		Pattern.CASE_INSENSITIVE);
+	private static final Pattern RAID_COMPLETION_DURATION = Pattern.compile(
+		"(?:total\\s+)?completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s)",
+		Pattern.CASE_INSENSITIVE);
+	private static final Pattern OBSERVED_ACTIVITY_DURATION = Pattern.compile(
+		"(?:Fight |Challenge |Corrupted challenge )?duration:?\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)"
+			+ "(?:\\.\\s*Personal best:|\\s*\\(new personal best\\))",
+		Pattern.CASE_INSENSITIVE);
 	private static final long SPECIAL_ACTIVITY_TIMEOUT_MILLIS = 15_000L;
+	private static final long RAID_COMPLETION_TIMEOUT_MILLIS = 15_000L;
 	private static final Set<String> DUPLICATE_KEYS = new HashSet<>(java.util.Arrays.asList(
 		"tztok-jad", "tzkal-zuk", "sol heredit", "hueycoatl", "gauntlet", "corrupted gauntlet", "nightmare",
 		"tzhaar fight cave", "inferno", "fortis colosseum", "the gauntlet", "the corrupted gauntlet",
@@ -70,6 +88,7 @@ public class PersonalBestService
 	@Inject private AnchorApiClient api;
 	@Inject private EventPipeline pipeline;
 	@Inject private PvmDiaryContractService diaryContract;
+	@Inject private PartyTracker parties;
 	private final Map<String, Double> known = new HashMap<>();
 	private volatile String status = "Never synced";
 	private String lastFingerprint;
@@ -77,11 +96,21 @@ public class PersonalBestService
 	private Scoreboard pendingScoreboard;
 	private String pendingSpecialActivity;
 	private long pendingSpecialActivityAt;
+	private String pendingRaidActivity;
+	private Long pendingRaidDurationMillis;
+	private Integer pendingRaidTeamSize;
+	private Integer pendingRaidInvocation;
+	private long pendingRaidAt;
+	private int knownDoomWave;
 
 	public String status() { return status; }
 	public void onLogin()
 	{
 		pendingSpecialActivity = null;
+		pendingRaidActivity = null;
+		pendingRaidDurationMillis = null;
+		pendingRaidAt = 0;
+		knownDoomWave = client.getVarpValue(VarPlayerID.DOM_LEVEL_HIGHSCORES);
 		hydrateKnown();
 		diaryContract.refresh();
 	}
@@ -103,7 +132,34 @@ public class PersonalBestService
 	@Subscribe public void onChatMessage(ChatMessage event)
 	{
 		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) return;
-		String message = Text.removeTags(event.getMessage()).replace('\u00A0', ' ').trim();
+		String rawMessage = event.getMessage().replaceAll("(?i)<br\\s*/?>", " ");
+		String message = Text.removeTags(rawMessage).replace('\u00A0', ' ').replaceAll("\\s+", " ").trim();
+		AnchorModels.PbRecord completion = coxCompletionRecord(message);
+		if (completion != null)
+		{
+			if (client.getVarbitValue(VarbitID.RAIDS_CHALLENGE_MODE) > 0)
+				completion.variant = "challenge_mode";
+			captureRaidCompletion(completion, null);
+			return;
+		}
+
+		String raidActivity = raidActivityFromCompletionMessage(message);
+		if (raidActivity != null)
+		{
+			pendingRaidActivity = raidActivity;
+			AnchorModels.Party party = parties.snapshot(raidActivity);
+			pendingRaidTeamSize = party == null ? null : party.detectedPartySize;
+			pendingRaidInvocation = raidActivity.startsWith("Tombs of Amascut")
+				? client.getVarbitValue(VarbitID.TOA_CLIENT_RAID_LEVEL) : null;
+			pendingRaidAt = System.currentTimeMillis();
+		}
+		Long raidDuration = raidCompletionDurationMillis(message);
+		if (raidDuration != null)
+		{
+			pendingRaidDurationMillis = raidDuration;
+			pendingRaidAt = System.currentTimeMillis();
+		}
+		if (tryCapturePendingRaid()) return;
 		String activity = specialActivityFromKillCount(message);
 		if (activity != null)
 		{
@@ -112,14 +168,17 @@ public class PersonalBestService
 			return;
 		}
 
+		Double observedSeconds = observedActivityDuration(message);
 		Double seconds = newPersonalBestDuration(message);
-		if (seconds == null) return;
 		String pending = pendingSpecialActivity;
 		long age = System.currentTimeMillis() - pendingSpecialActivityAt;
+		if (observedSeconds != null && pending != null && age >= 0 && age <= SPECIAL_ACTIVITY_TIMEOUT_MILLIS)
+			captureObservedSoloActivity(pending, observedSeconds);
+		if (seconds == null) { if (observedSeconds != null) pendingSpecialActivity = null; return; }
 		pendingSpecialActivity = null;
 		if (pending == null || age < 0 || age > SPECIAL_ACTIVITY_TIMEOUT_MILLIS) return;
 
-		AnchorModels.PbRecord record = fromKey(pending, seconds);
+		AnchorModels.PbRecord record = diaryRecordFromKey(pending, seconds);
 		String key = recordKey(record);
 		Double previous = known.put(key, seconds);
 		if (previous != null && seconds >= previous) return;
@@ -131,7 +190,11 @@ public class PersonalBestService
 		if (message == null) return null;
 		Matcher matcher = SPECIAL_ACTIVITY_KILL_COUNT.matcher(message.trim());
 		if (!matcher.matches()) return null;
-		return matcher.group("boss").equalsIgnoreCase("TzTok-Jad") ? "TzHaar Fight Cave" : "Inferno";
+		String boss = matcher.group("boss");
+		if (boss.equalsIgnoreCase("TzTok-Jad")) return "TzHaar Fight Cave";
+		if (boss.equalsIgnoreCase("TzKal-Zuk")) return "Inferno";
+		if (boss.equalsIgnoreCase("Sol Heredit")) return "Fortis Colosseum";
+		return "Corrupted Gauntlet";
 	}
 
 	static Double newPersonalBestDuration(String message)
@@ -139,6 +202,107 @@ public class PersonalBestService
 		if (message == null) return null;
 		Matcher matcher = NEW_PB_DURATION.matcher(message.trim());
 		return matcher.matches() ? parseTime(matcher.group("time")) : null;
+	}
+
+	static Double observedActivityDuration(String message)
+	{
+		if (message == null) return null;
+		Matcher matcher = OBSERVED_ACTIVITY_DURATION.matcher(message.trim());
+		return matcher.find() ? parseTime(matcher.group("time")) : null;
+	}
+
+	private void captureObservedSoloActivity(String activity, double seconds)
+	{
+		AnchorModels.PbRecord record = diaryRecordFromKey(activity, seconds);
+		String sourceId = UUID.randomUUID().toString();
+		Map<String, Object> details = diaryContract.detailsForObservedResult(record, activity, null, sourceId);
+		if (details == null) return;
+		details.put("record", record);
+		details.put("autoSubmit", true);
+		AnchorModels.Source source = new AnchorModels.Source(); source.type = "activity"; source.name = record.activity;
+		pipeline.capture("diary", recordKey(record) + '|' + record.durationMillis, source, null, details, false);
+	}
+
+	static AnchorModels.PbRecord coxCompletionRecord(String message)
+	{
+		if (message == null) return null;
+		Matcher matcher = COX_COMPLETION.matcher(message.trim());
+		if (!matcher.find()) return null;
+		Double seconds = parseTime(matcher.group("time"));
+		if (seconds == null) return null;
+		AnchorModels.PbRecord record = new AnchorModels.PbRecord();
+		record.activity = "Chambers of Xeric";
+		record.teamSize = "Solo".equalsIgnoreCase(matcher.group("team")) ? 1 : Integer.valueOf(matcher.group("team"));
+		record.durationMillis = Math.round(seconds * 1000);
+		return record;
+	}
+
+	static Long raidCompletionDurationMillis(String message)
+	{
+		if (message == null) return null;
+		Matcher matcher = RAID_COMPLETION_DURATION.matcher(message);
+		if (!matcher.find()) return null;
+		Double seconds = parseTime(matcher.group("time"));
+		return seconds == null ? null : Math.round(seconds * 1000);
+	}
+
+	static String raidActivityFromCompletionMessage(String message)
+	{
+		if (message == null || !message.toLowerCase(Locale.ROOT).contains("count is:")) return null;
+		String lower = message.toLowerCase(Locale.ROOT);
+		if (lower.contains("theatre of blood"))
+			return lower.contains("hard mode") ? "Theatre of Blood Hard Mode" : "Theatre of Blood";
+		if (lower.contains("tombs of amascut"))
+			return lower.contains("expert mode") ? "Tombs of Amascut Expert Mode" : "Tombs of Amascut";
+		return null;
+	}
+
+	private boolean tryCapturePendingRaid()
+	{
+		long age = System.currentTimeMillis() - pendingRaidAt;
+		if (pendingRaidActivity == null || pendingRaidDurationMillis == null || pendingRaidTeamSize == null
+			|| age < 0 || age > RAID_COMPLETION_TIMEOUT_MILLIS) return false;
+		AnchorModels.PbRecord record = new AnchorModels.PbRecord();
+		record.activity = pendingRaidActivity;
+		record.teamSize = pendingRaidTeamSize;
+		record.durationMillis = pendingRaidDurationMillis;
+		if (pendingRaidActivity.contains("Hard Mode")) record.variant = "hard";
+		else if (pendingRaidActivity.contains("Expert Mode")) record.variant = "expert";
+		Integer invocation = pendingRaidInvocation;
+		pendingRaidActivity = null;
+		pendingRaidDurationMillis = null;
+		pendingRaidTeamSize = null;
+		pendingRaidInvocation = null;
+		captureRaidCompletion(record, invocation);
+		return true;
+	}
+
+	private void captureRaidCompletion(AnchorModels.PbRecord record, Integer invocation)
+	{
+		String sourceId = UUID.randomUUID().toString();
+		String rawKey = record.activity.toLowerCase(Locale.ROOT)
+			+ ("challenge_mode".equals(record.variant) ? " challenge mode" : "")
+			+ ' ' + record.teamSize + " players";
+		Map<String, Object> details = diaryContract.detailsForObservedResult(record, rawKey, invocation, sourceId);
+		if (details == null) return;
+		details.put("record", record);
+		details.put("autoSubmit", true);
+		AnchorModels.Source source = new AnchorModels.Source();
+		source.type = "raid";
+		source.name = record.activity;
+		pipeline.capture("diary", recordKey(record) + '|' + record.durationMillis,
+			source, null, details, true);
+	}
+
+	@Subscribe public void onVarbitChanged(VarbitChanged event)
+	{
+		if (event.getVarpId() != VarPlayerID.DOM_LEVEL_HIGHSCORES || event.getValue() <= knownDoomWave) return;
+		knownDoomWave = event.getValue();
+		Map<String, Object> details = diaryContract.detailsForWave(knownDoomWave, UUID.randomUUID().toString());
+		if (details == null) return;
+		details.put("autoSubmit", true);
+		AnchorModels.Source source = new AnchorModels.Source(); source.type = "activity"; source.name = "Doom of Mokhaiotl";
+		pipeline.capture("diary", "doom|wave|" + knownDoomWave, source, null, details, true);
 	}
 
 	@Subscribe public void onWidgetLoaded(WidgetLoaded event)
@@ -370,6 +534,11 @@ public class PersonalBestService
 		else if (lower.equals("corrupted gauntlet")) record.activity = "Corrupted Gauntlet";
 		else if (lower.equals("gauntlet")) record.activity = "Gauntlet";
 		else if (lower.equals("hueycoatl")) record.activity = "Hueycoatl";
+		if (lower.equals("sol heredit") || lower.equals("fortis colosseum")
+			|| lower.equals("tztok-jad") || lower.equals("tzhaar fight cave")
+			|| lower.equals("tzkal-zuk") || lower.equals("inferno")
+			|| lower.equals("corrupted gauntlet") || lower.equals("the corrupted gauntlet"))
+			record.teamSize = 1;
 
 		if (lower.startsWith("chambers of xeric")) record.activity = "Chambers of Xeric";
 		else if (lower.startsWith("theatre of blood")) record.activity = "Theatre of Blood";

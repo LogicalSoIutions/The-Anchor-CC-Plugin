@@ -7,6 +7,7 @@ package com.theanchor.pb;
 import com.theanchor.api.AnchorApiClient;
 import com.theanchor.evidence.EventPipeline;
 import com.theanchor.model.AnchorModels;
+import com.theanchor.service.PartyTracker;
 import java.lang.reflect.Field;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -47,6 +48,7 @@ public class PersonalBestServiceTest
 	{
 		AnchorModels.PbRecord fortis = PersonalBestService.diaryRecordFromKey("sol heredit", 1_234.5);
 		assertEquals("Fortis Colosseum", fortis.activity);
+		assertEquals(Integer.valueOf(1), fortis.teamSize);
 
 		AnchorModels.PbRecord raid = PersonalBestService.diaryRecordFromKey(
 			"chambers of xeric challenge mode 3 players", 1_234.5);
@@ -74,6 +76,89 @@ public class PersonalBestServiceTest
 		assertNull(PersonalBestService.newPersonalBestDuration("Duration: 30:18.60"));
 	}
 
+	@Test public void parsesNonPbCoxCompletionForDiaryEvidence()
+	{
+		AnchorModels.PbRecord record = PersonalBestService.coxCompletionRecord(
+			"Team size: 5 players Duration: 11:15.00 Personal best: 9:52.80 Olm duration: 5:13.2");
+		assertNotNull(record);
+		assertEquals("Chambers of Xeric", record.activity);
+		assertEquals(Integer.valueOf(5), record.teamSize);
+		assertEquals(Long.valueOf(675000L), record.durationMillis);
+	}
+
+	@Test public void parsesCombinedCoxCompletionAndOtherRaidSignals()
+	{
+		AnchorModels.PbRecord cox = PersonalBestService.coxCompletionRecord(
+			"Congratulations - your raid is complete! Team size: 3 players Duration: 12:00.00 (new personal best)");
+		assertNotNull(cox);
+		assertEquals(Integer.valueOf(3), cox.teamSize);
+		assertEquals(Long.valueOf(720000L), cox.durationMillis);
+		assertEquals(Long.valueOf(990000L), PersonalBestService.raidCompletionDurationMillis(
+			"Completion time: 16:30.00. Personal best: 15:42.00"));
+		assertEquals("Theatre of Blood Hard Mode", PersonalBestService.raidActivityFromCompletionMessage(
+			"Your Theatre of Blood: Hard Mode completion count is: 12."));
+		assertEquals("Tombs of Amascut Expert Mode", PersonalBestService.raidActivityFromCompletionMessage(
+			"Your Tombs of Amascut: Expert Mode completion count is: 42."));
+	}
+
+	@Test public void capturesNonPbCoxCompletionAsDiarySubmission() throws Exception
+	{
+		PersonalBestService service = new PersonalBestService();
+		Client client = mock(Client.class);
+		Player player = mock(Player.class);
+		EventPipeline pipeline = mock(EventPipeline.class);
+		PvmDiaryContractService diaryContract = mock(PvmDiaryContractService.class);
+		when(client.getLocalPlayer()).thenReturn(player);
+		when(player.getName()).thenReturn("LogicalMash");
+		when(diaryContract.detailsForObservedResult(any(), eq("chambers of xeric 5 players"), isNull(), anyString()))
+			.thenReturn(new java.util.LinkedHashMap<>(java.util.Map.of("activityId", "cox-five")));
+		inject(service, "client", client);
+		inject(service, "pipeline", pipeline);
+		inject(service, "diaryContract", diaryContract);
+
+		service.onChatMessage(chat("Congratulations - your raid is complete!"));
+		service.onChatMessage(chat(
+			"Team size: 5 players Duration: 11:15.00 Personal best: 9:52.80 Olm duration: 5:13.2"));
+
+		org.mockito.ArgumentCaptor<AnchorModels.Source> source =
+			org.mockito.ArgumentCaptor.forClass(AnchorModels.Source.class);
+		verify(pipeline).capture(eq("diary"), eq("Chambers of Xeric|null|5|overall|null|675000"),
+			source.capture(), isNull(), argThat(details -> Boolean.TRUE.equals(details.get("autoSubmit"))), eq(true));
+		assertEquals("Chambers of Xeric", source.getValue().name);
+	}
+
+	@Test public void capturesNonPbTobAndInvocationSpecificToaCompletions() throws Exception
+	{
+		PersonalBestService service = new PersonalBestService();
+		Client client = mock(Client.class);
+		EventPipeline pipeline = mock(EventPipeline.class);
+		PvmDiaryContractService diaryContract = mock(PvmDiaryContractService.class);
+		PartyTracker parties = mock(PartyTracker.class);
+		AnchorModels.Party tobParty = new AnchorModels.Party(); tobParty.detectedPartySize = 3;
+		AnchorModels.Party toaParty = new AnchorModels.Party(); toaParty.detectedPartySize = 1;
+		when(parties.snapshot("Theatre of Blood Hard Mode")).thenReturn(tobParty);
+		when(parties.snapshot("Tombs of Amascut Expert Mode")).thenReturn(toaParty);
+		when(client.getVarbitValue(net.runelite.api.gameval.VarbitID.TOA_CLIENT_RAID_LEVEL)).thenReturn(500);
+		when(diaryContract.detailsForObservedResult(any(), anyString(), nullable(Integer.class), anyString()))
+			.thenReturn(new java.util.LinkedHashMap<>(java.util.Map.of("activityId", "supported")));
+		inject(service, "client", client);
+		inject(service, "pipeline", pipeline);
+		inject(service, "diaryContract", diaryContract);
+		inject(service, "parties", parties);
+
+		service.onChatMessage(chat("Completion time: 20:00.00. Personal best: 19:00.00"));
+		service.onChatMessage(chat("Your Theatre of Blood: Hard Mode completion count is: 12."));
+		service.onChatMessage(chat("Total completion time: 26:00.00. Personal best: 25:00.00"));
+		service.onChatMessage(chat("Your Tombs of Amascut: Expert Mode completion count is: 42."));
+
+		verify(diaryContract).detailsForObservedResult(any(),
+			eq("theatre of blood hard mode 3 players"), isNull(), anyString());
+		verify(diaryContract).detailsForObservedResult(any(),
+			eq("tombs of amascut expert mode 1 players"), eq(500), anyString());
+		verify(pipeline, times(2)).capture(eq("diary"), anyString(), any(AnchorModels.Source.class),
+			isNull(), anyMap(), eq(true));
+	}
+
 	@Test public void capturesFightCavesAndInfernoPbsAsSubmissions() throws Exception
 	{
 		PersonalBestService service = new PersonalBestService();
@@ -96,9 +181,9 @@ public class PersonalBestServiceTest
 		service.onChatMessage(chat("Your TzKal-Zuk kill count is: 7."));
 		service.onChatMessage(chat("Duration: 1:01:30.20 (new personal best)"));
 
-		verify(pipeline).capture(eq("personal_best"), eq("TzHaar Fight Cave|null|null|overall|null|1818600"),
+		verify(pipeline).capture(eq("personal_best"), eq("TzHaar Fight Cave|null|1|overall|null|1818600"),
 			isNull(), isNull(), anyMap(), eq(false));
-		verify(pipeline).capture(eq("personal_best"), eq("Inferno|null|null|overall|null|3690200"),
+		verify(pipeline).capture(eq("personal_best"), eq("Inferno|null|1|overall|null|3690200"),
 			isNull(), isNull(), anyMap(), eq(false));
 		verify(api, times(2)).syncPbs(any(AnchorModels.PbBulkRequest.class), eq(false), any());
 	}

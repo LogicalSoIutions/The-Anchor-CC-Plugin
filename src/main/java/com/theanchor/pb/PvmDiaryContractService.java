@@ -31,20 +31,57 @@ public class PvmDiaryContractService
 	public java.util.Map<String, Object> detailsFor(AnchorModels.PbRecord record, String rawKey, String sourceId)
 	{
 		if (record == null || record.durationMillis == null || sourceId == null) return null;
-		String activityId = activityId(record, rawKey);
+		String activityId = activityId(record, rawKey, null);
 		if (activityId == null || !isSupported(activityId, "time", record.teamSize)) return null;
+		return details(activityId, "time", record.durationMillis, record.teamSize, "personal_best", sourceId);
+	}
+
+	/** Maps a directly observed raid completion even when it did not set a PB. */
+	public java.util.Map<String, Object> detailsForRaidCompletion(AnchorModels.PbRecord record, String rawKey,
+		String sourceId)
+	{
+		return detailsForObservedResult(record, rawKey, null, sourceId);
+	}
+
+	/** Maps a directly observed raid result, including TOA invocation-specific and completion-only entries. */
+	public java.util.Map<String, Object> detailsForObservedResult(AnchorModels.PbRecord record, String rawKey,
+		Integer invocation, String sourceId)
+	{
+		if (record == null || record.durationMillis == null || sourceId == null) return null;
+		String activityId = activityId(record, rawKey, invocation);
+		AnchorModels.PvmDiaryContractActivity activity = supportedActivity(activityId, record.teamSize);
+		if (activity == null || (!"time".equals(activity.kind) && !"completion".equals(activity.kind))) return null;
+		Long result = "completion".equals(activity.kind) ? null : record.durationMillis;
+		return details(activityId, activity.kind, result, record.teamSize, invocation, "raid_completion", sourceId);
+	}
+
+	public java.util.Map<String, Object> detailsForWave(int wave, String sourceId)
+	{
+		if (wave <= 0 || sourceId == null || !isSupported("doom", "wave", 1)) return null;
+		return details("doom", "wave", Long.valueOf(wave), 1, null, "game_varp", sourceId);
+	}
+
+	private static java.util.Map<String, Object> details(String activityId, String resultKind, Long result,
+		Integer teamSize, String source, String sourceId)
+	{
+		return details(activityId, resultKind, result, teamSize, null, source, sourceId);
+	}
+
+	private static java.util.Map<String, Object> details(String activityId, String resultKind, Long result,
+		Integer teamSize, Integer invocation, String source, String sourceId)
+	{
 		java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
 		details.put("activityId", activityId);
-		details.put("resultKind", "time");
-		details.put("result", record.durationMillis);
-		details.put("teamSize", record.teamSize);
-		details.put("invocation", null);
-		details.put("source", "personal_best");
+		details.put("resultKind", resultKind);
+		details.put("result", result);
+		details.put("teamSize", teamSize);
+		details.put("invocation", invocation);
+		details.put("source", source);
 		details.put("sourceId", sourceId);
 		return details;
 	}
 
-	private String activityId(AnchorModels.PbRecord record, String rawKey)
+	private String activityId(AnchorModels.PbRecord record, String rawKey, Integer invocation)
 	{
 		String raw = rawKey == null ? "" : rawKey.trim().toLowerCase(Locale.ROOT);
 		if ("sol heredit".equals(raw) || "fortis colosseum".equals(raw)) return "colosseum";
@@ -64,8 +101,12 @@ public class PvmDiaryContractService
 			if (raw.contains("hard mode")) return tobId("hmt", exactTeamSize);
 			if (!raw.contains("hard") && !raw.contains("entry")) return tobId("tob", exactTeamSize);
 		}
-		// TOA needs an observed invocation and completion-only activities need
-		// completion evidence, neither of which a generic time PB proves.
+		if (raw.startsWith("tombs of amascut") && exactTeamSize == 1)
+		{
+			if (Integer.valueOf(300).equals(invocation)) return "toa-300";
+			if (Integer.valueOf(500).equals(invocation)) return "toa-500";
+		}
+		// TOA needs an observed invocation and completion-only activities need completion evidence.
 		return null;
 	}
 
@@ -85,6 +126,7 @@ public class PvmDiaryContractService
 
 	private static String tobId(String prefix, int teamSize)
 	{
+		if (teamSize == 1) return "tob".equals(prefix) ? "tob-solo" : null;
 		if (teamSize == 2) return prefix + "-duo";
 		if (teamSize == 3) return prefix + "-trio";
 		if (teamSize == 4) return prefix + "-four";
@@ -93,11 +135,16 @@ public class PvmDiaryContractService
 
 	private boolean isSupported(String id, String kind, Integer teamSize)
 	{
+		AnchorModels.PvmDiaryContractActivity activity = supportedActivity(id, teamSize);
+		return activity != null && kind.equals(activity.kind);
+	}
+
+	private AnchorModels.PvmDiaryContractActivity supportedActivity(String id, Integer teamSize)
+	{
 		AnchorModels.PvmDiaryContract current = contract;
-		if (current == null || current.activities == null || teamSize == null) return false;
+		if (id == null || current == null || current.activities == null || teamSize == null) return null;
 		for (AnchorModels.PvmDiaryContractActivity activity : current.activities)
-			if (id.equals(activity.id) && kind.equals(activity.kind) && teamSize.intValue() == activity.teamSize)
-				return true;
-		return false;
+			if (id.equals(activity.id) && teamSize.intValue() == activity.teamSize) return activity;
+		return null;
 	}
 }

@@ -93,7 +93,7 @@ public class AnchorDataService
 				message = currentPlayerClanMember ? "Profile loaded" : "Not found in The Anchor roster";
 				if (currentPlayerClanMember)
 				{
-					loadPvmDiaryStatus(profile.member == null ? null : profile.member.discordId, requestedName);
+					loadPvmDiaryStatus(requestedName);
 					String url = profileImageUrl(playerName);
 					images.loadProfile(playerName, url, image ->
 					{
@@ -172,10 +172,10 @@ public class AnchorDataService
 		loadCompetitionImage("sotw", panels == null ? null : panels.sotw);
 	}
 
-	private void loadPvmDiaryStatus(String discordId, String playerName)
+	private void loadPvmDiaryStatus(String playerName)
 	{
-		if (discordId == null || discordId.isBlank()) { pvmDiaryStatus = null; return; }
-		api.getPvmDiaryStatus(discordId, result ->
+		if (playerName == null || playerName.isBlank()) { pvmDiaryStatus = null; return; }
+		api.getPvmDiaryStatus(playerName, result ->
 		{
 			if (!samePlayer(requestedPlayerName, playerName)) return;
 			pvmDiaryStatus = result.isSuccessful() ? result.value : null;

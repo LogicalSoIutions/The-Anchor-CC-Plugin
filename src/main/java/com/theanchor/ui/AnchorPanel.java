@@ -675,9 +675,11 @@ public class AnchorPanel extends PluginPanel {
 
 	private static String diaryBestResult(AnchorModels.PvmDiaryActivity activity) {
 		if (activity.bestResult == null) return "—";
-		if ("wave".equals(activity.kind)) return "Wave " + number(activity.bestResult);
+		if (activity.bestResult.label != null && !activity.bestResult.label.isBlank()) return activity.bestResult.label;
+		if (activity.bestResult.value == null) return "—";
+		if ("wave".equals(activity.kind)) return "Wave " + number(activity.bestResult.value);
 		if ("completion".equals(activity.kind)) return "Complete";
-		long totalSeconds = Math.max(0, activity.bestResult / 1000);
+		long totalSeconds = Math.max(0, activity.bestResult.value / 1000);
 		long hours = totalSeconds / 3600;
 		long minutes = (totalSeconds % 3600) / 60;
 		long seconds = totalSeconds % 60;

@@ -100,9 +100,9 @@ public class AnchorApiClient
 		get("/api/competitions/panels", false, AnchorModels.CompetitionPanels.class, callback);
 	}
 
-	public void getPvmDiaryStatus(String discordId, ResultCallback<AnchorModels.PvmDiaryStatus> callback)
+	public void getPvmDiaryStatus(String rsn, ResultCallback<AnchorModels.PvmDiaryStatus> callback)
 	{
-		get("/api/pvm-diary/status?discord_id=" + encode(discordId), false, AnchorModels.PvmDiaryStatus.class, callback);
+		get("/api/pvm-diary/status?rsn=" + encode(rsn), false, AnchorModels.PvmDiaryStatus.class, callback);
 	}
 
 	public void getPvmDiaryContract(ResultCallback<AnchorModels.PvmDiaryContract> callback)

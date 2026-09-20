@@ -141,9 +141,14 @@ public final class AnchorModels
 		public String kind;
 		public List<PvmDiaryTier> tiers = new ArrayList<>();
 		public long earnedPoints;
-		public Long bestResult;
+		public PvmDiaryBestResult bestResult;
 		public PvmDiaryTier nextTarget;
 		public int pendingCount;
+	}
+	public static final class PvmDiaryBestResult
+	{
+		public Long value;
+		public String label;
 	}
 
 	public static final class PvmDiaryTier
@@ -162,6 +167,7 @@ public final class AnchorModels
 	{
 		public int contractVersion;
 		public String catalogueVersion;
+		@SerializedName(value = "catalogue", alternate = {"activities"})
 		public List<PvmDiaryContractActivity> activities = new ArrayList<>();
 	}
 
