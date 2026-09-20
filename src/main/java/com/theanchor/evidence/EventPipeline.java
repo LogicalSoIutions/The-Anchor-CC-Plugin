@@ -52,12 +52,27 @@ public class EventPipeline
 	public void capture(String type, String dedupeKey, AnchorModels.Source source, List<AnchorModels.Item> items,
 		java.util.Map<String, Object> details, boolean includeParty)
 	{
-		capture(type, dedupeKey, source, items, details, includeParty, null, true, true);
+		capture(type, dedupeKey, source, items, details, includeParty, null, true, true, null);
+	}
+
+	/** Captures an event with the party snapshot taken at the observed completion. */
+	public void capture(String type, String dedupeKey, AnchorModels.Source source, List<AnchorModels.Item> items,
+		java.util.Map<String, Object> details, AnchorModels.Party party)
+	{
+		capture(type, dedupeKey, source, items, details, party != null, null, true, true, party);
 	}
 
 	public void capture(String type, String dedupeKey, AnchorModels.Source source, List<AnchorModels.Item> items,
 		java.util.Map<String, Object> details, boolean includeParty, String rulesVersionOverride,
 		boolean screenshotRequired, boolean finalizeSubmission)
+	{
+		capture(type, dedupeKey, source, items, details, includeParty, rulesVersionOverride,
+			screenshotRequired, finalizeSubmission, null);
+	}
+
+	private void capture(String type, String dedupeKey, AnchorModels.Source source, List<AnchorModels.Item> items,
+		java.util.Map<String, Object> details, boolean includeParty, String rulesVersionOverride,
+		boolean screenshotRequired, boolean finalizeSubmission, AnchorModels.Party partyOverride)
 	{
 		Player local = client.getLocalPlayer();
 		long now = System.currentTimeMillis();
@@ -74,7 +89,8 @@ public class EventPipeline
 			partySource = ((AnchorModels.PbRecord) details.get("record")).activity;
 		boolean individualAward = isIndividualAward(type, partySource, details)
 			|| ("loot".equals(type) && source != null && "creation".equals(source.type));
-		envelope.party = includeParty ? parties.snapshot(partySource, individualAward) : null;
+		envelope.party = partyOverride != null ? partyOverride
+			: includeParty ? parties.snapshot(partySource, individualAward) : null;
 		// Collection-log notifications normally have no party metadata. Keep a
 		// provisional raid roster for a clog-only raid; prepareRaidGroup removes it
 		// when normal raid loot supplies the authoritative roster.

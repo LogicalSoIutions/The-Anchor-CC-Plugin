@@ -960,6 +960,10 @@ public class AnchorPanel extends PluginPanel {
 		if (group == null || !config.autoSubmitEnabled()) return true;
 		for (EvidenceStore.Record record : group) {
 			if (record == null || record.metadata == null || record.metadata.context == null) continue;
+			// A locally-created draft can explicitly opt out of automatic
+			// submission while still being intended for manual submission.
+			if (record.metadata.details != null
+					&& Boolean.FALSE.equals(record.metadata.details.get("autoSubmit"))) continue;
 			Object value = record.metadata.context.get("finalizeSubmission");
 			if (Boolean.FALSE.equals(value) || "false".equalsIgnoreCase(String.valueOf(value))) return false;
 		}

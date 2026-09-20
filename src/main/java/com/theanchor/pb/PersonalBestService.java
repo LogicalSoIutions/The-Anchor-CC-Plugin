@@ -214,13 +214,15 @@ public class PersonalBestService
 	private void captureObservedSoloActivity(String activity, double seconds)
 	{
 		AnchorModels.PbRecord record = diaryRecordFromKey(activity, seconds);
+		AnchorModels.Party party = verifiedDiaryParty(record);
+		if (party == null) return;
 		String sourceId = UUID.randomUUID().toString();
 		Map<String, Object> details = diaryContract.detailsForObservedResult(record, activity, null, sourceId);
 		if (details == null) return;
 		details.put("record", record);
 		details.put("autoSubmit", true);
 		AnchorModels.Source source = new AnchorModels.Source(); source.type = "activity"; source.name = record.activity;
-		pipeline.capture("diary", recordKey(record) + '|' + record.durationMillis, source, null, details, false);
+		pipeline.capture("diary", recordKey(record) + '|' + record.durationMillis, source, null, details, party);
 	}
 
 	static AnchorModels.PbRecord coxCompletionRecord(String message)
@@ -279,6 +281,8 @@ public class PersonalBestService
 
 	private void captureRaidCompletion(AnchorModels.PbRecord record, Integer invocation)
 	{
+		AnchorModels.Party party = verifiedDiaryParty(record);
+		if (party == null) return;
 		String sourceId = UUID.randomUUID().toString();
 		String rawKey = record.activity.toLowerCase(Locale.ROOT)
 			+ ("challenge_mode".equals(record.variant) ? " challenge mode" : "")
@@ -291,7 +295,7 @@ public class PersonalBestService
 		source.type = "raid";
 		source.name = record.activity;
 		pipeline.capture("diary", recordKey(record) + '|' + record.durationMillis,
-			source, null, details, true);
+			source, null, details, party);
 	}
 
 	@Subscribe public void onVarbitChanged(VarbitChanged event)
@@ -300,9 +304,12 @@ public class PersonalBestService
 		knownDoomWave = event.getValue();
 		Map<String, Object> details = diaryContract.detailsForWave(knownDoomWave, UUID.randomUUID().toString());
 		if (details == null) return;
+		AnchorModels.PbRecord record = new AnchorModels.PbRecord(); record.activity = "Doom of Mokhaiotl"; record.teamSize = 1;
+		AnchorModels.Party party = verifiedDiaryParty(record);
+		if (party == null) return;
 		details.put("autoSubmit", true);
 		AnchorModels.Source source = new AnchorModels.Source(); source.type = "activity"; source.name = "Doom of Mokhaiotl";
-		pipeline.capture("diary", "doom|wave|" + knownDoomWave, source, null, details, true);
+		pipeline.capture("diary", "doom|wave|" + knownDoomWave, source, null, details, party);
 	}
 
 	@Subscribe public void onWidgetLoaded(WidgetLoaded event)
@@ -467,8 +474,18 @@ public class PersonalBestService
 			Map<String, Object> diaryDetails = diaryContract.detailsFor(record, rawKey, sourceId);
 			if (diaryDetails != null)
 			{
+				AnchorModels.Party party = verifiedDiaryParty(record);
+				if (party == null)
+				{
+					pipeline.capture("personal_best", recordKey(record) + '|' + record.durationMillis,
+						null, null, details, false);
+					return;
+				}
 				details.putAll(diaryDetails);
-				pipeline.capture("diary", recordKey(record) + '|' + record.durationMillis, null, null, details, false);
+				AnchorModels.Source source = new AnchorModels.Source();
+				source.type = "activity";
+				source.name = record.activity;
+				pipeline.capture("diary", recordKey(record) + '|' + record.durationMillis, source, null, details, party);
 			}
 			else
 			{
@@ -477,6 +494,16 @@ public class PersonalBestService
 				pipeline.capture("personal_best", recordKey(record) + '|' + record.durationMillis, null, null, details, false);
 			}
 		}
+	}
+
+	/** A diary team must be the roster observed by the party tracker, not a guessed PB bucket. */
+	private AnchorModels.Party verifiedDiaryParty(AnchorModels.PbRecord record)
+	{
+		if (record == null || record.teamSize == null) return null;
+		AnchorModels.Party party = parties.snapshot(record.activity);
+		if (party == null || party.detectedPartySize != record.teamSize.intValue()) return null;
+		if (record.teamSize > 1 && !"high".equals(party.confidence)) return null;
+		return party;
 	}
 
 	private void message(String text)

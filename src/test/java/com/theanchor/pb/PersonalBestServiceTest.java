@@ -108,6 +108,9 @@ public class PersonalBestServiceTest
 		Player player = mock(Player.class);
 		EventPipeline pipeline = mock(EventPipeline.class);
 		PvmDiaryContractService diaryContract = mock(PvmDiaryContractService.class);
+		PartyTracker parties = mock(PartyTracker.class);
+		AnchorModels.Party party = new AnchorModels.Party(); party.detectedPartySize = 5; party.confidence = "high";
+		when(parties.snapshot("Chambers of Xeric")).thenReturn(party);
 		when(client.getLocalPlayer()).thenReturn(player);
 		when(player.getName()).thenReturn("LogicalMash");
 		when(diaryContract.detailsForObservedResult(any(), eq("chambers of xeric 5 players"), isNull(), anyString()))
@@ -115,6 +118,7 @@ public class PersonalBestServiceTest
 		inject(service, "client", client);
 		inject(service, "pipeline", pipeline);
 		inject(service, "diaryContract", diaryContract);
+		inject(service, "parties", parties);
 
 		service.onChatMessage(chat("Congratulations - your raid is complete!"));
 		service.onChatMessage(chat(
@@ -123,7 +127,7 @@ public class PersonalBestServiceTest
 		org.mockito.ArgumentCaptor<AnchorModels.Source> source =
 			org.mockito.ArgumentCaptor.forClass(AnchorModels.Source.class);
 		verify(pipeline).capture(eq("diary"), eq("Chambers of Xeric|null|5|overall|null|675000"),
-			source.capture(), isNull(), argThat(details -> Boolean.TRUE.equals(details.get("autoSubmit"))), eq(true));
+			source.capture(), isNull(), argThat(details -> Boolean.TRUE.equals(details.get("autoSubmit"))), same(party));
 		assertEquals("Chambers of Xeric", source.getValue().name);
 	}
 
@@ -134,8 +138,8 @@ public class PersonalBestServiceTest
 		EventPipeline pipeline = mock(EventPipeline.class);
 		PvmDiaryContractService diaryContract = mock(PvmDiaryContractService.class);
 		PartyTracker parties = mock(PartyTracker.class);
-		AnchorModels.Party tobParty = new AnchorModels.Party(); tobParty.detectedPartySize = 3;
-		AnchorModels.Party toaParty = new AnchorModels.Party(); toaParty.detectedPartySize = 1;
+		AnchorModels.Party tobParty = new AnchorModels.Party(); tobParty.detectedPartySize = 3; tobParty.confidence = "high";
+		AnchorModels.Party toaParty = new AnchorModels.Party(); toaParty.detectedPartySize = 1; toaParty.confidence = "high";
 		when(parties.snapshot("Theatre of Blood Hard Mode")).thenReturn(tobParty);
 		when(parties.snapshot("Tombs of Amascut Expert Mode")).thenReturn(toaParty);
 		when(client.getVarbitValue(net.runelite.api.gameval.VarbitID.TOA_CLIENT_RAID_LEVEL)).thenReturn(500);
@@ -156,7 +160,7 @@ public class PersonalBestServiceTest
 		verify(diaryContract).detailsForObservedResult(any(),
 			eq("tombs of amascut expert mode 1 players"), eq(500), anyString());
 		verify(pipeline, times(2)).capture(eq("diary"), anyString(), any(AnchorModels.Source.class),
-			isNull(), anyMap(), eq(true));
+			isNull(), anyMap(), any(AnchorModels.Party.class));
 	}
 
 	@Test public void capturesFightCavesAndInfernoPbsAsSubmissions() throws Exception
@@ -167,7 +171,11 @@ public class PersonalBestServiceTest
 		AnchorApiClient api = mock(AnchorApiClient.class);
 		EventPipeline pipeline = mock(EventPipeline.class);
 		PvmDiaryContractService diaryContract = mock(PvmDiaryContractService.class);
+		PartyTracker parties = mock(PartyTracker.class);
+		AnchorModels.Party soloParty = new AnchorModels.Party(); soloParty.detectedPartySize = 1; soloParty.confidence = "high";
 		when(diaryContract.detailsFor(any(), anyString(), anyString())).thenReturn(null);
+		when(diaryContract.detailsForObservedResult(any(), anyString(), nullable(Integer.class), anyString())).thenReturn(null);
+		when(parties.snapshot(anyString())).thenReturn(soloParty);
 		when(client.getLocalPlayer()).thenReturn(player);
 		when(player.getName()).thenReturn("LogicalMash");
 		when(client.getAccountHash()).thenReturn(123L);
@@ -175,6 +183,7 @@ public class PersonalBestServiceTest
 		inject(service, "api", api);
 		inject(service, "pipeline", pipeline);
 		inject(service, "diaryContract", diaryContract);
+		inject(service, "parties", parties);
 
 		service.onChatMessage(chat("Your TzTok-Jad kill count is: 18."));
 		service.onChatMessage(chat("Duration: 30:18.60 (new personal best)"));
