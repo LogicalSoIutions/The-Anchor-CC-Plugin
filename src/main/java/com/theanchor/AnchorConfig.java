@@ -113,4 +113,5 @@ public interface AnchorConfig extends Config
 		description = "Log detailed CoX, ToB, and ToA party detection data while testing a real raid",
 		section = TESTING, position = 1)
 	default boolean debugRaidPartyDetection() { return false; }
+
 }

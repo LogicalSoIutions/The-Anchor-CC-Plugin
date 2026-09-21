@@ -97,6 +97,8 @@ public class PersonalBestServiceTest
 			"Completion time: 16:30.00. Personal best: 15:42.00"));
 		assertEquals("Theatre of Blood Hard Mode", PersonalBestService.raidActivityFromCompletionMessage(
 			"Your Theatre of Blood: Hard Mode completion count is: 12."));
+		assertEquals("Theatre of Blood Hard Mode", PersonalBestService.raidActivityFromCompletionMessage(
+			"Wave 'The Final Challenge' (Hard Mode) complete!"));
 		assertEquals("Tombs of Amascut Expert Mode", PersonalBestService.raidActivityFromCompletionMessage(
 			"Your Tombs of Amascut: Expert Mode completion count is: 42."));
 	}
@@ -150,7 +152,8 @@ public class PersonalBestServiceTest
 		inject(service, "diaryContract", diaryContract);
 		inject(service, "parties", parties);
 
-		service.onChatMessage(chat("Completion time: 20:00.00. Personal best: 19:00.00"));
+		service.onChatMessage(chat("Theatre of Blood completion time: 20:00.00. Personal best: 19:00.00"));
+		service.onChatMessage(chat("Total completion time: 26:00.00. Personal best: 25:00.00"));
 		service.onChatMessage(chat("Your Theatre of Blood: Hard Mode completion count is: 12."));
 		service.onChatMessage(chat("Total completion time: 26:00.00. Personal best: 25:00.00"));
 		service.onChatMessage(chat("Your Tombs of Amascut: Expert Mode completion count is: 42."));
@@ -161,6 +164,11 @@ public class PersonalBestServiceTest
 			eq("tombs of amascut expert mode 1 players"), eq(500), anyString());
 		verify(pipeline, times(2)).capture(eq("diary"), anyString(), any(AnchorModels.Source.class),
 			isNull(), anyMap(), any(AnchorModels.Party.class));
+		org.mockito.ArgumentCaptor<String> fingerprints = org.mockito.ArgumentCaptor.forClass(String.class);
+		verify(pipeline, times(2)).capture(eq("diary"), fingerprints.capture(), any(AnchorModels.Source.class),
+			isNull(), anyMap(), any(AnchorModels.Party.class));
+		assertTrue(fingerprints.getAllValues().contains("Theatre of Blood Hard Mode|hard|3|overall|null|1200000"));
+		assertTrue(fingerprints.getAllValues().contains("Tombs of Amascut Expert Mode|expert|1|overall|null|1560000"));
 	}
 
 	@Test public void capturesFightCavesAndInfernoPbsAsSubmissions() throws Exception

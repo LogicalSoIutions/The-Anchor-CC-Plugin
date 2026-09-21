@@ -28,11 +28,11 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ChatMessage;
-import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
-import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.ScriptID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -59,11 +59,18 @@ public class PersonalBestService
 			+ "(?:\\s+Olm duration:.*)?$",
 		Pattern.CASE_INSENSITIVE);
 	private static final Pattern RAID_COMPLETION_DURATION = Pattern.compile(
-		"(?:total\\s+)?completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s)",
+		"(?<!total\\s)completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s)",
 		Pattern.CASE_INSENSITIVE);
+	private static final Pattern TOTAL_RAID_COMPLETION_DURATION = Pattern.compile(
+		"total\\s+completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s)",
+		Pattern.CASE_INSENSITIVE);
+	private static final Pattern TOB_HARD_MODE_COMPLETION = Pattern.compile(
+		"^Wave 'The Final Challenge' \\(Hard Mode\\) complete!?$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern OBSERVED_ACTIVITY_DURATION = Pattern.compile(
 		"(?:Fight |Challenge |Corrupted challenge )?duration:?\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)"
 			+ "(?:\\.\\s*Personal best:|\\s*\\(new personal best\\))",
+		Pattern.CASE_INSENSITIVE);
+	private static final Pattern DOOM_COMPLETION_TITLE = Pattern.compile("^Level\\s+(?<level>[1-9][0-9]*)\\s+Complete!$",
 		Pattern.CASE_INSENSITIVE);
 	private static final long SPECIAL_ACTIVITY_TIMEOUT_MILLIS = 15_000L;
 	private static final long RAID_COMPLETION_TIMEOUT_MILLIS = 15_000L;
@@ -97,20 +104,21 @@ public class PersonalBestService
 	private String pendingSpecialActivity;
 	private long pendingSpecialActivityAt;
 	private String pendingRaidActivity;
-	private Long pendingRaidDurationMillis;
+	/** ToB diary entries use the raid completion time, not the total completion time. */
+	private Long pendingRaidCompletionDurationMillis;
+	private Long pendingRaidTotalDurationMillis;
 	private Integer pendingRaidTeamSize;
 	private Integer pendingRaidInvocation;
 	private long pendingRaidAt;
-	private int knownDoomWave;
 
 	public String status() { return status; }
 	public void onLogin()
 	{
 		pendingSpecialActivity = null;
 		pendingRaidActivity = null;
-		pendingRaidDurationMillis = null;
+		pendingRaidCompletionDurationMillis = null;
+		pendingRaidTotalDurationMillis = null;
 		pendingRaidAt = 0;
-		knownDoomWave = client.getVarpValue(VarPlayerID.DOM_LEVEL_HIGHSCORES);
 		hydrateKnown();
 		diaryContract.refresh();
 	}
@@ -153,10 +161,16 @@ public class PersonalBestService
 				? client.getVarbitValue(VarbitID.TOA_CLIENT_RAID_LEVEL) : null;
 			pendingRaidAt = System.currentTimeMillis();
 		}
-		Long raidDuration = raidCompletionDurationMillis(message);
-		if (raidDuration != null)
+		Long raidCompletionDuration = completionTimeMillis(message);
+		if (raidCompletionDuration != null)
 		{
-			pendingRaidDurationMillis = raidDuration;
+			pendingRaidCompletionDurationMillis = raidCompletionDuration;
+			pendingRaidAt = System.currentTimeMillis();
+		}
+		Long totalRaidDuration = totalCompletionTimeMillis(message);
+		if (totalRaidDuration != null)
+		{
+			pendingRaidTotalDurationMillis = totalRaidDuration;
 			pendingRaidAt = System.currentTimeMillis();
 		}
 		if (tryCapturePendingRaid()) return;
@@ -241,6 +255,12 @@ public class PersonalBestService
 
 	static Long raidCompletionDurationMillis(String message)
 	{
+		Long completion = completionTimeMillis(message);
+		return completion != null ? completion : totalCompletionTimeMillis(message);
+	}
+
+	private static Long completionTimeMillis(String message)
+	{
 		if (message == null) return null;
 		Matcher matcher = RAID_COMPLETION_DURATION.matcher(message);
 		if (!matcher.find()) return null;
@@ -248,9 +268,20 @@ public class PersonalBestService
 		return seconds == null ? null : Math.round(seconds * 1000);
 	}
 
+	private static Long totalCompletionTimeMillis(String message)
+	{
+		if (message == null) return null;
+		Matcher matcher = TOTAL_RAID_COMPLETION_DURATION.matcher(message);
+		if (!matcher.find()) return null;
+		Double seconds = parseTime(matcher.group("time"));
+		return seconds == null ? null : Math.round(seconds * 1000);
+	}
+
 	static String raidActivityFromCompletionMessage(String message)
 	{
-		if (message == null || !message.toLowerCase(Locale.ROOT).contains("count is:")) return null;
+		if (message == null) return null;
+		if (TOB_HARD_MODE_COMPLETION.matcher(message.trim()).matches()) return "Theatre of Blood Hard Mode";
+		if (!message.toLowerCase(Locale.ROOT).contains("count is:")) return null;
 		String lower = message.toLowerCase(Locale.ROOT);
 		if (lower.contains("theatre of blood"))
 			return lower.contains("hard mode") ? "Theatre of Blood Hard Mode" : "Theatre of Blood";
@@ -262,17 +293,22 @@ public class PersonalBestService
 	private boolean tryCapturePendingRaid()
 	{
 		long age = System.currentTimeMillis() - pendingRaidAt;
-		if (pendingRaidActivity == null || pendingRaidDurationMillis == null || pendingRaidTeamSize == null
+		if (pendingRaidActivity == null || pendingRaidTeamSize == null
 			|| age < 0 || age > RAID_COMPLETION_TIMEOUT_MILLIS) return false;
+		Long duration = pendingRaidActivity.startsWith("Theatre of Blood")
+			? pendingRaidCompletionDurationMillis
+			: pendingRaidTotalDurationMillis != null ? pendingRaidTotalDurationMillis : pendingRaidCompletionDurationMillis;
+		if (duration == null) return false;
 		AnchorModels.PbRecord record = new AnchorModels.PbRecord();
 		record.activity = pendingRaidActivity;
 		record.teamSize = pendingRaidTeamSize;
-		record.durationMillis = pendingRaidDurationMillis;
+		record.durationMillis = duration;
 		if (pendingRaidActivity.contains("Hard Mode")) record.variant = "hard";
 		else if (pendingRaidActivity.contains("Expert Mode")) record.variant = "expert";
 		Integer invocation = pendingRaidInvocation;
 		pendingRaidActivity = null;
-		pendingRaidDurationMillis = null;
+		pendingRaidCompletionDurationMillis = null;
+		pendingRaidTotalDurationMillis = null;
 		pendingRaidTeamSize = null;
 		pendingRaidInvocation = null;
 		captureRaidCompletion(record, invocation);
@@ -298,18 +334,32 @@ public class PersonalBestService
 			source, null, details, party);
 	}
 
-	@Subscribe public void onVarbitChanged(VarbitChanged event)
+	/**
+	 * Matches RuneLite's Loot Tracker: this script fires after the player claims
+	 * Doom loot, while the completion dialog still contains the completed level.
+	 */
+	@Subscribe public void onScriptPreFired(ScriptPreFired event)
 	{
-		if (event.getVarpId() != VarPlayerID.DOM_LEVEL_HIGHSCORES || event.getValue() <= knownDoomWave) return;
-		knownDoomWave = event.getValue();
-		Map<String, Object> details = diaryContract.detailsForWave(knownDoomWave, UUID.randomUUID().toString());
+		if (event.getScriptId() != ScriptID.DOM_LOOT_CLAIM) return;
+		Widget frame = client.getWidget(InterfaceID.DomEndLevelUi.FRAME);
+		Widget title = frame == null ? null : frame.getChild(1);
+		String text = title == null ? null : Text.removeTags(title.getText()).trim();
+		Matcher matcher = text == null ? null : DOOM_COMPLETION_TITLE.matcher(text);
+		if (matcher == null || !matcher.matches()) return;
+		captureCompletedDoomDelve(Integer.parseInt(matcher.group("level")));
+	}
+
+	private void captureCompletedDoomDelve(int completedDoomDelve)
+	{
+		if (!diaryContract.isDoomWaveEligible(completedDoomDelve)) return;
+		Map<String, Object> details = diaryContract.detailsForWave(completedDoomDelve, UUID.randomUUID().toString());
 		if (details == null) return;
 		AnchorModels.PbRecord record = new AnchorModels.PbRecord(); record.activity = "Doom of Mokhaiotl"; record.teamSize = 1;
 		AnchorModels.Party party = verifiedDiaryParty(record);
 		if (party == null) return;
 		details.put("autoSubmit", true);
 		AnchorModels.Source source = new AnchorModels.Source(); source.type = "activity"; source.name = "Doom of Mokhaiotl";
-		pipeline.capture("diary", "doom|wave|" + knownDoomWave, source, null, details, party);
+		pipeline.capture("diary", "doom|wave|" + completedDoomDelve, source, null, details, party);
 	}
 
 	@Subscribe public void onWidgetLoaded(WidgetLoaded event)

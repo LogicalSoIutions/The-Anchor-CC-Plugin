@@ -61,6 +61,19 @@ public class PvmDiaryContractService
 		return details("doom", "wave", Long.valueOf(wave), 1, null, "game_varp", sourceId);
 	}
 
+	/** Whether a result reaches the lowest server-defined Doom diary target. */
+	public boolean isDoomWaveEligible(int wave)
+	{
+		AnchorModels.PvmDiaryContractActivity activity = supportedActivity("doom", 1);
+		if (wave <= 0 || activity == null || !"wave".equals(activity.kind) || activity.tiers == null) return false;
+		Long minimumTarget = null;
+		for (AnchorModels.PvmDiaryTier tier : activity.tiers)
+			if (tier != null && tier.target != null && tier.target.longValue() > 0
+				&& (minimumTarget == null || tier.target.longValue() < minimumTarget.longValue()))
+				minimumTarget = tier.target;
+		return minimumTarget != null && wave >= minimumTarget.longValue();
+	}
+
 	private static java.util.Map<String, Object> details(String activityId, String resultKind, Long result,
 		Integer teamSize, String source, String sourceId)
 	{

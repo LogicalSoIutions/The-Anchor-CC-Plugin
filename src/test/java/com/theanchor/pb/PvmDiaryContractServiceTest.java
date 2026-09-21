@@ -68,7 +68,11 @@ public class PvmDiaryContractServiceTest
 		contract.catalogueVersion = "2026-09-19";
 		contract.activities.add(activity("tob-solo", "completion", 1));
 		contract.activities.add(activity("toa-300", "time", 1));
-		contract.activities.add(activity("doom", "wave", 1));
+		AnchorModels.PvmDiaryContractActivity doom = activity("doom", "wave", 1);
+		doom.tiers.add(tier("easy", 10));
+		doom.tiers.add(tier("medium", 16));
+		doom.tiers.add(tier("hard", 40));
+		contract.activities.add(doom);
 		inject(service, "contract", contract);
 
 		AnchorModels.PbRecord tob = PersonalBestService.diaryRecordFromKey("theatre of blood solo", 1800);
@@ -87,6 +91,9 @@ public class PvmDiaryContractServiceTest
 			"tombs of amascut expert mode 1 players", 350, "raid-4"));
 
 		assertEquals(40L, service.detailsForWave(40, "doom-1").get("result"));
+		assertFalse(service.isDoomWaveEligible(9));
+		assertTrue(service.isDoomWaveEligible(10));
+		assertTrue(service.isDoomWaveEligible(20));
 	}
 
 	@Test public void deserializesLiveCatalogueField()
@@ -103,6 +110,13 @@ public class PvmDiaryContractServiceTest
 		AnchorModels.PvmDiaryContractActivity activity = new AnchorModels.PvmDiaryContractActivity();
 		activity.id = id; activity.kind = kind; activity.teamSize = teamSize;
 		return activity;
+	}
+
+	private static AnchorModels.PvmDiaryTier tier(String name, long target)
+	{
+		AnchorModels.PvmDiaryTier tier = new AnchorModels.PvmDiaryTier();
+		tier.tier = name; tier.target = target;
+		return tier;
 	}
 
 	private static void inject(Object target, String fieldName, Object value)

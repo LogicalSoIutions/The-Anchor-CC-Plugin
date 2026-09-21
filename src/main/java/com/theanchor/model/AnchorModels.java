@@ -177,6 +177,8 @@ public final class AnchorModels
 		public String kind;
 		public int teamSize;
 		public Integer invocation;
+		/** Server-defined result thresholds, such as Doom delve targets. */
+		public List<PvmDiaryTier> tiers = new ArrayList<>();
 	}
 
 	public static final class Competition
