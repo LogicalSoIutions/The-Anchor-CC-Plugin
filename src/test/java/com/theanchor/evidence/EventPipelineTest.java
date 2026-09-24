@@ -14,6 +14,7 @@ import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
 import static org.mockito.Mockito.*;
+import static org.junit.Assert.assertTrue;
 
 public class EventPipelineTest
 {
@@ -48,7 +49,18 @@ public class EventPipelineTest
 		assertRaidUploadOrder(false, "draft", false);
 	}
 
+	@Test public void raidSubmissionGuardReleasesAfterUpdateFailure() throws Exception
+	{
+		assertRaidUploadOrder(false, "draft", true, false);
+	}
+
 	private static void assertRaidUploadOrder(boolean lootFirst, String lootStatus, boolean enabled) throws Exception
+	{
+		assertRaidUploadOrder(lootFirst, lootStatus, enabled, true);
+	}
+
+	private static void assertRaidUploadOrder(boolean lootFirst, String lootStatus, boolean enabled,
+		boolean updateSucceeds) throws Exception
 	{
 		EventPipeline pipeline = new EventPipeline();
 		EvidenceStore store = mock(EvidenceStore.class);
@@ -80,9 +92,16 @@ public class EventPipelineTest
 		}).when(api).uploadEvent(any(), any(), any(), any());
 		doAnswer(call -> {
 			AnchorApiClient.ResultCallback<Map> callback = call.getArgument(6);
-			callback.complete(AnchorApiClient.ApiResult.ok(200, new HashMap<>()));
+			callback.complete(updateSucceeds
+				? AnchorApiClient.ApiResult.ok(200, new HashMap<>())
+				: AnchorApiClient.ApiResult.error(500, "Update failed"));
 			return null;
 		}).when(api).updateSubmission(anyString(), anyInt(), anyInt(), anyInt(), anyList(), anyString(), any());
+		doAnswer(call -> {
+			AnchorApiClient.ResultCallback<Map> callback = call.getArgument(1);
+			callback.complete(AnchorApiClient.ApiResult.ok(200, new HashMap<>()));
+			return null;
+		}).when(api).submit(anyString(), any());
 
 		pipeline.upload(loot, true);
 		pipeline.upload(clog, true);
@@ -94,10 +113,14 @@ public class EventPipelineTest
 		if (enabled && !"failed".equals(lootStatus))
 		{
 			verify(api).updateSubmission(eq("collection_log-id"), eq(3), eq(2), eq(1), anyList(), eq(""), any());
-			verify(api).submit(eq("collection_log-id"), any());
+			if (updateSucceeds) verify(api).submit(eq("collection_log-id"), any());
+			else verify(api, never()).submit(anyString(), any());
 		}
 		else verify(api, never()).submit(anyString(), any());
 		verify(api, never()).updateSubmission(eq("loot-id"), anyInt(), anyInt(), anyInt(), anyList(), anyString(), any());
+		@SuppressWarnings("unchecked") java.util.Set<String> submitting =
+			(java.util.Set<String>) field(pipeline, "raidGroupsBeingSubmitted");
+		assertTrue(submitting.isEmpty());
 	}
 
 	private static EvidenceStore.Record raidRecord(String type)
@@ -182,5 +205,12 @@ public class EventPipelineTest
 		Field field = target.getClass().getDeclaredField(name);
 		field.setAccessible(true);
 		field.set(target, value);
+	}
+
+	private static Object field(Object target, String name) throws Exception
+	{
+		Field field = target.getClass().getDeclaredField(name);
+		field.setAccessible(true);
+		return field.get(target);
 	}
 }

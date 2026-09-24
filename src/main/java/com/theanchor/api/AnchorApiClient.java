@@ -38,7 +38,7 @@ public class AnchorApiClient
 {
 	public static final String ANCHOR_ORIGIN = "https://the-anchor.cc";
 	private static final Logger log = LoggerFactory.getLogger(AnchorApiClient.class);
-	public static final String PLUGIN_VERSION = "1.1.0";
+	public static final String PLUGIN_VERSION = "1.1.1";
 	private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 	private final OkHttpClient http;
 	private final Gson gson;

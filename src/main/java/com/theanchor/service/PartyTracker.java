@@ -216,6 +216,8 @@ public class PartyTracker
 			completedRaidSource = null;
 			completedRaidAt = 0;
 			awaitingCompletedRosterClear = false;
+			recentRaidSource = null;
+			recentRaidSourceAt = 0;
 		}
 	}
 
@@ -233,7 +235,14 @@ public class PartyTracker
 	/** Remember named raid loot before event filtering/deduplication so collection-log events share its category. */
 	public void observeSource(String sourceName)
 	{
-		if (!BossRegistry.isRaid(sourceName)) return;
+		if (!BossRegistry.isRaid(sourceName))
+		{
+			// Any subsequent non-raid loot is stronger evidence than the short
+			// delayed-notification window left by the previous raid reward.
+			recentRaidSource = null;
+			recentRaidSourceAt = 0;
+			return;
+		}
 		recentRaidSource = sourceName;
 		recentRaidSourceAt = System.currentTimeMillis();
 		if (sameRaid(sourceName, activeRaidSource)) activeRaidSource = sourceName;
@@ -245,10 +254,13 @@ public class PartyTracker
 	{
 		String source = raidContextSource();
 		long age = System.currentTimeMillis() - recentRaidSourceAt;
-		boolean sessionContext = source != null && (sameRaid(source, activeRaidSource)
-			|| (sameRaid(source, completedRaidSource) && completedRaidAt > 0
-				&& System.currentTimeMillis() - completedRaidAt <= COMPLETED_RAID_MILLIS));
-		if (source != null && (sessionContext || (age >= 0 && age <= RECENT_RAID_SOURCE_MILLIS)))
+		boolean activeContext = source != null && sameRaid(source, activeRaidSource);
+		boolean completingContext = source != null && awaitingCompletedRosterClear
+			&& sameRaid(source, completedRaidSource) && completedRaidAt > 0
+			&& System.currentTimeMillis() - completedRaidAt <= COMPLETED_RAID_MILLIS;
+		boolean recentLootContext = source != null && sameRaid(source, recentRaidSource)
+			&& age >= 0 && age <= RECENT_RAID_SOURCE_MILLIS;
+		if (source != null && (activeContext || completingContext || recentLootContext))
 		{
 			AnchorModels.Source resolved = new AnchorModels.Source();
 			resolved.type = fallback == null ? "collection_log" : fallback.type;
@@ -335,8 +347,6 @@ public class PartyTracker
 		activeRaidSource = source;
 		activeRaidNames = cleaned;
 		debugRaidRoster("roster-changed", source, cleaned);
-		recentRaidSource = source;
-		recentRaidSourceAt = System.currentTimeMillis();
 	}
 
 	private AnchorModels.Party storedRaidParty(String sourceName)
@@ -359,9 +369,11 @@ public class PartyTracker
 	private String raidContextSource()
 	{
 		if (activeRaidSource != null) return activeRaidSource;
-		if (completedRaidSource != null && completedRaidAt > 0
+		if (awaitingCompletedRosterClear && completedRaidSource != null && completedRaidAt > 0
 			&& System.currentTimeMillis() - completedRaidAt <= COMPLETED_RAID_MILLIS) return completedRaidSource;
-		return recentRaidSource;
+		return recentRaidSourceAt > 0
+			&& System.currentTimeMillis() - recentRaidSourceAt <= RECENT_RAID_SOURCE_MILLIS
+			? recentRaidSource : null;
 	}
 
 	static String finalBossRaid(String name)

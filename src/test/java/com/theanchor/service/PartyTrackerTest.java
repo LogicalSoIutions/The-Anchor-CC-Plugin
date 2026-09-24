@@ -224,6 +224,53 @@ public class PartyTrackerTest
 		assertEquals("raid_party_final_boss", party.method);
 	}
 
+	@Test public void completedRaidDoesNotClaimCollectionLogAfterRosterClears() throws Exception
+	{
+		PartyTracker tracker = new PartyTracker();
+		Client client = mock(Client.class);
+		setField(tracker, "client", client);
+		setField(tracker, "completedRaidSource", "Chambers of Xeric");
+		setField(tracker, "completedRaidParty", PartyTracker.snapshotFromData(8, List.of(),
+			"raid_party_final_boss", "high"));
+		setField(tracker, "completedRaidAt", System.currentTimeMillis());
+		setField(tracker, "awaitingCompletedRosterClear", true);
+
+		tracker.onGameTick(mock(net.runelite.api.events.GameTick.class));
+
+		AnchorModels.Source collectionLog = new AnchorModels.Source();
+		collectionLog.type = "collection_log";
+		collectionLog.name = "Collection Log";
+		assertSame(collectionLog, tracker.resolveCollectionLogSource(collectionLog));
+	}
+
+	@Test public void recentRaidLootStillClaimsItsDelayedCollectionLog() throws Exception
+	{
+		PartyTracker tracker = new PartyTracker();
+		setField(tracker, "client", mock(Client.class));
+		tracker.observeSource("Chambers of Xeric");
+		AnchorModels.Source collectionLog = new AnchorModels.Source();
+		collectionLog.type = "collection_log";
+		collectionLog.name = "Collection Log";
+
+		AnchorModels.Source resolved = tracker.resolveCollectionLogSource(collectionLog);
+
+		assertEquals("Chambers of Xeric", resolved.name);
+		assertEquals("collection_log", resolved.type);
+	}
+
+	@Test public void soloLootClearsRecentRaidCollectionLogAttribution() throws Exception
+	{
+		PartyTracker tracker = new PartyTracker();
+		setField(tracker, "client", mock(Client.class));
+		tracker.observeSource("Chambers of Xeric");
+		tracker.observeSource("Vorkath");
+		AnchorModels.Source collectionLog = new AnchorModels.Source();
+		collectionLog.type = "collection_log";
+		collectionLog.name = "Collection Log";
+
+		assertSame(collectionLog, tracker.resolveCollectionLogSource(collectionLog));
+	}
+
 	@Test public void tracksVisiblePlayersWhenLocalPlayerIsNotTargeting() throws Exception
 	{
 		PartyTracker tracker = new PartyTracker();

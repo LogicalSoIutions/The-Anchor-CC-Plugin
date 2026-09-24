@@ -20,6 +20,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
@@ -330,7 +331,12 @@ public class EventPipeline
 		for (EvidenceStore.Record record : records)
 			if (record.status == AnchorModels.EventStatus.DRAFT && shouldAutoSubmit(record)) eligible.add(record);
 		if (eligible.isEmpty() || groupId == null || !raidGroupsBeingSubmitted.add(groupId)) return;
-		for (EvidenceStore.Record record : eligible) autoSubmit(record, party);
+		AtomicInteger remaining = new AtomicInteger(eligible.size());
+		Runnable release = () ->
+		{
+			if (remaining.decrementAndGet() == 0) raidGroupsBeingSubmitted.remove(groupId);
+		};
+		for (EvidenceStore.Record record : eligible) autoSubmit(record, party, release);
 	}
 
 	private boolean shouldAutoSubmit(EvidenceStore.Record record)
@@ -381,21 +387,33 @@ public class EventPipeline
 
 	private void autoSubmit(EvidenceStore.Record record, AnchorModels.Party party)
 	{
+		autoSubmit(record, party, () -> { });
+	}
+
+	private void autoSubmit(EvidenceStore.Record record, AnchorModels.Party party, Runnable completion)
+	{
 		int partySize = party == null ? 1 : party.submittedPartySize;
 		int clanMembers = party == null ? 0 : party.submittedClanMemberCount;
 		int nonClanMembers = party == null ? 0 : party.submittedNonClanMemberCount;
 		updateAndSubmit(record, partySize, clanMembers, nonClanMembers,
-			party == null ? List.of() : party.submittedMembers, "");
+			party == null ? List.of() : party.submittedMembers, "", completion);
 	}
 
 	public void updateAndSubmit(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers,
 		List<AnchorModels.PartyMember> partyMembers, String notes)
+	{
+		updateAndSubmit(record, partySize, clanMembers, nonClanMembers, partyMembers, notes, () -> { });
+	}
+
+	private void updateAndSubmit(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers,
+		List<AnchorModels.PartyMember> partyMembers, String notes, Runnable completion)
 	{
 		if (record.submissionId == null)
 		{
 			record.error = "Submission ID is unavailable; retry the upload";
 			log.error("Could not submit event {}: submission ID is unavailable", eventId(record));
 			persist(record);
+			completion.run();
 			return;
 		}
 		record.status = AnchorModels.EventStatus.UPLOADING;
@@ -421,6 +439,7 @@ public class EventPipeline
 				log.error("Submission update failed for event {} (submission {}): HTTP {}, error={}",
 					eventId(record), record.submissionId, patched.statusCode, patched.error);
 				persist(record);
+				completion.run();
 				return;
 			}
 			api.submit(record.submissionId, submitted ->
@@ -434,6 +453,7 @@ public class EventPipeline
 						eventId(record), record.submissionId, submitted.statusCode, submitted.error);
 				}
 				persist(record);
+				completion.run();
 			});
 		});
 	}
