@@ -125,12 +125,39 @@ public class PersonalBestServiceTest
 		service.onChatMessage(chat("Congratulations - your raid is complete!"));
 		service.onChatMessage(chat(
 			"Team size: 5 players Duration: 11:15.00 Personal best: 9:52.80 Olm duration: 5:13.2"));
+		service.onChatMessage(chat("Your completed Chambers of Xeric count is: 42."));
 
 		org.mockito.ArgumentCaptor<AnchorModels.Source> source =
 			org.mockito.ArgumentCaptor.forClass(AnchorModels.Source.class);
 		verify(pipeline).capture(eq("diary"), eq("Chambers of Xeric|null|5|overall|null|675000"),
 			source.capture(), isNull(), argThat(details -> Boolean.TRUE.equals(details.get("autoSubmit"))), same(party));
 		assertEquals("Chambers of Xeric", source.getValue().name);
+	}
+
+	@Test public void capturesChallengeModeCoxCompletionFromCountMessage() throws Exception
+	{
+		PersonalBestService service = new PersonalBestService();
+		Client client = mock(Client.class);
+		EventPipeline pipeline = mock(EventPipeline.class);
+		PvmDiaryContractService diaryContract = mock(PvmDiaryContractService.class);
+		PartyTracker parties = mock(PartyTracker.class);
+		AnchorModels.Party party = new AnchorModels.Party(); party.detectedPartySize = 3; party.confidence = "high";
+		when(parties.snapshot("Chambers of Xeric")).thenReturn(party);
+		when(diaryContract.detailsForObservedResult(any(),
+			eq("chambers of xeric challenge mode 3 players"), isNull(), anyString()))
+			.thenReturn(new java.util.LinkedHashMap<>(java.util.Map.of("activityId", "cm-trio")));
+		inject(service, "client", client);
+		inject(service, "pipeline", pipeline);
+		inject(service, "diaryContract", diaryContract);
+		inject(service, "parties", parties);
+
+		service.onChatMessage(chat("Team size: 3 players Duration: 24:24.00 Personal best: 22:37.20 Olm duration: 7:24.0"));
+		service.onChatMessage(chat("Your completed Chambers of Xeric Challenge Mode count is: 154."));
+
+		verify(diaryContract).detailsForObservedResult(any(),
+			eq("chambers of xeric challenge mode 3 players"), isNull(), anyString());
+		verify(pipeline).capture(eq("diary"), eq("Chambers of Xeric|challenge_mode|3|overall|null|1464000"),
+			any(AnchorModels.Source.class), isNull(), argThat(details -> Boolean.TRUE.equals(details.get("autoSubmit"))), same(party));
 	}
 
 	@Test public void capturesNonPbTobAndInvocationSpecificToaCompletions() throws Exception

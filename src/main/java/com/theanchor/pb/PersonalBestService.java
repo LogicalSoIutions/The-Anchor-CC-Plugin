@@ -58,6 +58,9 @@ public class PersonalBestService
 			+ "(?:\\s+Personal best:\\s*[0-9:]+(?:\\.[0-9]+)?|\\s*\\(new personal best\\))"
 			+ "(?:\\s+Olm duration:.*)?$",
 		Pattern.CASE_INSENSITIVE);
+	private static final Pattern COX_COMPLETION_COUNT = Pattern.compile(
+		"^Your completed Chambers of Xeric(?<challenge> Challenge Mode)? count is: [0-9,]+\\.?$",
+		Pattern.CASE_INSENSITIVE);
 	private static final Pattern RAID_COMPLETION_DURATION = Pattern.compile(
 		"(?<!total\\s)completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s)",
 		Pattern.CASE_INSENSITIVE);
@@ -74,6 +77,7 @@ public class PersonalBestService
 		Pattern.CASE_INSENSITIVE);
 	private static final long SPECIAL_ACTIVITY_TIMEOUT_MILLIS = 15_000L;
 	private static final long RAID_COMPLETION_TIMEOUT_MILLIS = 15_000L;
+	private static final long COX_COMPLETION_CONFIRMATION_TIMEOUT_MILLIS = 5_000L;
 	private static final Set<String> DUPLICATE_KEYS = new HashSet<>(java.util.Arrays.asList(
 		"tztok-jad", "tzkal-zuk", "sol heredit", "hueycoatl", "gauntlet", "corrupted gauntlet", "nightmare",
 		"tzhaar fight cave", "inferno", "fortis colosseum", "the gauntlet", "the corrupted gauntlet",
@@ -110,6 +114,9 @@ public class PersonalBestService
 	private Integer pendingRaidTeamSize;
 	private Integer pendingRaidInvocation;
 	private long pendingRaidAt;
+	/** CoX's mode is confirmed by the completion-count chat line, which follows the time line. */
+	private AnchorModels.PbRecord pendingCoxCompletion;
+	private long pendingCoxCompletionAt;
 
 	public String status() { return status; }
 	public void onLogin()
@@ -119,6 +126,8 @@ public class PersonalBestService
 		pendingRaidCompletionDurationMillis = null;
 		pendingRaidTotalDurationMillis = null;
 		pendingRaidAt = 0;
+		pendingCoxCompletion = null;
+		pendingCoxCompletionAt = 0;
 		hydrateKnown();
 		diaryContract.refresh();
 	}
@@ -145,10 +154,20 @@ public class PersonalBestService
 		AnchorModels.PbRecord completion = coxCompletionRecord(message);
 		if (completion != null)
 		{
-			if (client.getVarbitValue(VarbitID.RAIDS_CHALLENGE_MODE) > 0)
-				completion.variant = "challenge_mode";
-			captureRaidCompletion(completion, null);
+			capturePendingCoxCompletion();
+			pendingCoxCompletion = completion;
+			pendingCoxCompletionAt = System.currentTimeMillis();
 			return;
+		}
+		if (pendingCoxCompletion != null)
+		{
+			Matcher coxCount = COX_COMPLETION_COUNT.matcher(message);
+			if (coxCount.matches())
+			{
+				if (coxCount.group("challenge") != null) pendingCoxCompletion.variant = "challenge_mode";
+				capturePendingCoxCompletion();
+				return;
+			}
 		}
 
 		String raidActivity = raidActivityFromCompletionMessage(message);
@@ -373,6 +392,9 @@ public class PersonalBestService
 
 	@Subscribe public void onGameTick(GameTick event)
 	{
+		if (pendingCoxCompletion != null
+			&& System.currentTimeMillis() - pendingCoxCompletionAt >= COX_COMPLETION_CONFIRMATION_TIMEOUT_MILLIS)
+			capturePendingCoxCompletion();
 		if (pendingScoreboard != null) { Scoreboard scoreboard = pendingScoreboard; pendingScoreboard = null; readScoreboard(scoreboard); }
 		if (!journalLoaded) return; journalLoaded = false;
 		Widget title = client.getWidget(InterfaceID.Journalscroll.TITLE);
@@ -404,6 +426,15 @@ public class PersonalBestService
 			lastFingerprint = fingerprint;
 			sync(records, true, false, null, true);
 		}
+	}
+
+	private void capturePendingCoxCompletion()
+	{
+		if (pendingCoxCompletion == null) return;
+		AnchorModels.PbRecord completion = pendingCoxCompletion;
+		pendingCoxCompletion = null;
+		pendingCoxCompletionAt = 0;
+		captureRaidCompletion(completion, null);
 	}
 
 	static Widget[] collectChildren(Widget parent)
