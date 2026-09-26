@@ -13,6 +13,7 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.client.events.ConfigChanged;
 import org.junit.Test;
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -208,7 +209,6 @@ public class PersonalBestServiceTest
 		PvmDiaryContractService diaryContract = mock(PvmDiaryContractService.class);
 		PartyTracker parties = mock(PartyTracker.class);
 		AnchorModels.Party soloParty = new AnchorModels.Party(); soloParty.detectedPartySize = 1; soloParty.confidence = "high";
-		when(diaryContract.detailsFor(any(), anyString(), anyString())).thenReturn(null);
 		when(diaryContract.detailsForObservedResult(any(), anyString(), nullable(Integer.class), anyString())).thenReturn(null);
 		when(parties.snapshot(anyString())).thenReturn(soloParty);
 		when(client.getLocalPlayer()).thenReturn(player);
@@ -230,6 +230,42 @@ public class PersonalBestServiceTest
 		verify(pipeline).capture(eq("personal_best"), eq("Inferno|null|1|overall|null|3690200"),
 			isNull(), isNull(), anyMap(), eq(false));
 		verify(api, times(2)).syncPbs(any(AnchorModels.PbBulkRequest.class), eq(false), any());
+	}
+
+	@Test public void capturesColosseumDiaryFromChatNotRawPersonalBestConfig() throws Exception
+	{
+		PersonalBestService service = new PersonalBestService();
+		Client client = mock(Client.class);
+		Player player = mock(Player.class);
+		AnchorApiClient api = mock(AnchorApiClient.class);
+		EventPipeline pipeline = mock(EventPipeline.class);
+		PvmDiaryContractService diaryContract = mock(PvmDiaryContractService.class);
+		PartyTracker parties = mock(PartyTracker.class);
+		AnchorModels.Party soloParty = new AnchorModels.Party(); soloParty.detectedPartySize = 1; soloParty.confidence = "high";
+		when(client.getLocalPlayer()).thenReturn(player);
+		when(player.getName()).thenReturn("Todd Z");
+		when(client.getAccountHash()).thenReturn(2736852895717199329L);
+		when(parties.snapshot("Fortis Colosseum")).thenReturn(soloParty);
+		when(diaryContract.detailsForObservedResult(any(), eq("Fortis Colosseum"), isNull(), anyString()))
+			.thenReturn(new java.util.LinkedHashMap<>(java.util.Map.of("activityId", "colosseum")));
+		inject(service, "client", client);
+		inject(service, "api", api);
+		inject(service, "pipeline", pipeline);
+		inject(service, "diaryContract", diaryContract);
+		inject(service, "parties", parties);
+
+		ConfigChanged rawPb = mock(ConfigChanged.class);
+		when(rawPb.getGroup()).thenReturn("personalbest");
+		when(rawPb.getKey()).thenReturn("sol heredit");
+		when(rawPb.getNewValue()).thenReturn("1208.4");
+		service.onConfigChanged(rawPb);
+		service.onChatMessage(chat("Your Sol Heredit kill count is: 26."));
+		service.onChatMessage(chat("Colosseum duration: 19:40.80 (new personal best)"));
+
+		verify(pipeline).capture(eq("diary"), eq("Fortis Colosseum|null|1|overall|null|1180800"),
+			any(AnchorModels.Source.class), isNull(), argThat(details -> "colosseum".equals(details.get("activityId"))), same(soloParty));
+		verify(pipeline, never()).capture(eq("diary"), eq("Fortis Colosseum|null|1|overall|null|1208400"),
+			any(), isNull(), anyMap(), any());
 	}
 
 	private static ChatMessage chat(String text)

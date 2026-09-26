@@ -19,7 +19,7 @@ public class PvmDiaryContractServiceTest
 		inject(service, "contract", contract);
 
 		AnchorModels.PbRecord record = PersonalBestService.diaryRecordFromKey("chambers of xeric 3 players", 880);
-		Map<String, Object> details = service.detailsFor(record, "chambers of xeric 3 players", "pb-1");
+		Map<String, Object> details = service.detailsForObservedResult(record, "chambers of xeric 3 players", null, "pb-1");
 
 		assertNotNull(details);
 		assertEquals("cox-trio", details.get("activityId"));
@@ -33,10 +33,10 @@ public class PvmDiaryContractServiceTest
 		AnchorModels.PvmDiaryContract contract = new AnchorModels.PvmDiaryContract();
 		contract.catalogueVersion = "2026-09-19";
 		inject(service, "contract", contract);
-		assertNull(service.detailsFor(PersonalBestService.diaryRecordFromKey("chambers of xeric 5+ players", 800),
-			"chambers of xeric 5+ players", "pb-1"));
-		assertNull(service.detailsFor(PersonalBestService.diaryRecordFromKey("tombs of amascut expert mode solo", 800),
-			"tombs of amascut expert mode solo", "pb-2"));
+		assertNull(service.detailsForObservedResult(PersonalBestService.diaryRecordFromKey("chambers of xeric 5+ players", 800),
+			"chambers of xeric 5+ players", null, "pb-1"));
+		assertNull(service.detailsForObservedResult(PersonalBestService.diaryRecordFromKey("tombs of amascut expert mode solo", 800),
+			"tombs of amascut expert mode solo", null, "pb-2"));
 	}
 
 	@Test public void mapsObservedRaidCompletionWithoutRequiringAPersonalBest()

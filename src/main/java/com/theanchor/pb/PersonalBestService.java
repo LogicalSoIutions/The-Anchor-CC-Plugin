@@ -70,7 +70,7 @@ public class PersonalBestService
 	private static final Pattern TOB_HARD_MODE_COMPLETION = Pattern.compile(
 		"^Wave 'The Final Challenge' \\(Hard Mode\\) complete!?$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern OBSERVED_ACTIVITY_DURATION = Pattern.compile(
-		"(?:Fight |Challenge |Corrupted challenge )?duration:?\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)"
+		"(?:Fight |Challenge |Corrupted challenge |Colosseum )?duration:?\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)"
 			+ "(?:\\.\\s*Personal best:|\\s*\\(new personal best\\))",
 		Pattern.CASE_INSENSITIVE);
 	private static final Pattern DOOM_COMPLETION_TITLE = Pattern.compile("^Level\\s+(?<level>[1-9][0-9]*)\\s+Complete!$",
@@ -135,15 +135,15 @@ public class PersonalBestService
 	@Subscribe public void onConfigChanged(ConfigChanged event)
 	{
 		if (!GROUP.equals(event.getGroup()) || event.getNewValue() == null) return;
-		// Do not defer raw raid or internally-named activity keys to the
-		// Adventure Log: that widget only loads when a player opens it, which
-		// left their new diary result undetected.
+		// The personalbest profile keeps the PB catalogue current, but is not
+		// completion evidence. Some activities store a timer that differs from
+		// the game completion message, so diary evidence is chat-driven only.
 		double seconds; try { seconds = Double.parseDouble(event.getNewValue()); } catch (NumberFormatException e) { return; }
 		AnchorModels.PbRecord record = diaryRecordFromKey(event.getKey(), seconds);
 		String key = recordKey(record);
 		Double previous = known.put(key, seconds);
 		if (previous != null && seconds >= previous) return;
-		sync(java.util.Collections.singletonList(record), false, true, previous, false, event.getKey());
+		sync(java.util.Collections.singletonList(record), false, true, previous, false);
 	}
 
 	@Subscribe public void onChatMessage(ChatMessage event)
@@ -215,7 +215,7 @@ public class PersonalBestService
 		String key = recordKey(record);
 		Double previous = known.put(key, seconds);
 		if (previous != null && seconds >= previous) return;
-		sync(java.util.Collections.singletonList(record), false, true, previous, false, pending);
+		sync(java.util.Collections.singletonList(record), false, true, previous, false);
 	}
 
 	static String specialActivityFromKillCount(String message)
@@ -466,7 +466,7 @@ public class PersonalBestService
 		Double seconds = raw == null ? null : parseTime(raw); if (!title.toLowerCase(Locale.ROOT).contains(scoreboard.boss.toLowerCase(Locale.ROOT)) || seconds == null) return;
 		String key = scoreboard.boss + (title.toLowerCase(Locale.ROOT).contains("awakened") ? " (awakened)" : "");
 		Double previous = known.put(key, seconds); if (previous != null && seconds >= previous) return;
-		sync(java.util.Collections.singletonList(fromKey(key, seconds)), false, true, previous, false, key);
+		sync(java.util.Collections.singletonList(fromKey(key, seconds)), false, true, previous, false);
 	}
 
 	private static Scoreboard scoreboardFor(int groupId)
@@ -504,16 +504,10 @@ public class PersonalBestService
 
 	private void sync(List<AnchorModels.PbRecord> records, boolean bulk, boolean evidence, Double previous)
 	{
-		sync(records, bulk, evidence, previous, false, null);
+		sync(records, bulk, evidence, previous, false);
 	}
 
 	private void sync(List<AnchorModels.PbRecord> records, boolean bulk, boolean evidence, Double previous, boolean fromAdventureLog)
-	{
-		sync(records, bulk, evidence, previous, fromAdventureLog, null);
-	}
-
-	private void sync(List<AnchorModels.PbRecord> records, boolean bulk, boolean evidence, Double previous,
-		boolean fromAdventureLog, String rawKey)
 	{
 		if ((!bulk && records.isEmpty()) || client.getLocalPlayer() == null) return;
 		if (fromAdventureLog)
@@ -551,29 +545,10 @@ public class PersonalBestService
 			details.put("record", record);
 			details.put("autoSubmit", true);
 			if (previous != null) details.put("previousDurationMillis", Math.round(previous * 1000));
-			String sourceId = UUID.randomUUID().toString();
-			Map<String, Object> diaryDetails = diaryContract.detailsFor(record, rawKey, sourceId);
-			if (diaryDetails != null)
-			{
-				AnchorModels.Party party = verifiedDiaryParty(record);
-				if (party == null)
-				{
-					pipeline.capture("personal_best", recordKey(record) + '|' + record.durationMillis,
-						null, null, details, false);
-					return;
-				}
-				details.putAll(diaryDetails);
-				AnchorModels.Source source = new AnchorModels.Source();
-				source.type = "activity";
-				source.name = record.activity;
-				pipeline.capture("diary", recordKey(record) + '|' + record.durationMillis, source, null, details, party);
-			}
-			else
-			{
-				// A generic PB remains a normal PB when mode, exact party size,
-				// invocation, or result type cannot be proven from the capture.
-				pipeline.capture("personal_best", recordKey(record) + '|' + record.durationMillis, null, null, details, false);
-			}
+			// A PB update (from profile config, a scoreboard, or a PB chat line) is
+			// never enough to prove a diary completion. Completion handlers submit
+			// diary evidence separately, using the exact result printed by the game.
+			pipeline.capture("personal_best", recordKey(record) + '|' + record.durationMillis, null, null, details, false);
 		}
 	}
 

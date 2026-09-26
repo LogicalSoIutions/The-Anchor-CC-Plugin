@@ -28,14 +28,6 @@ public class PvmDiaryContractService
 		});
 	}
 
-	public java.util.Map<String, Object> detailsFor(AnchorModels.PbRecord record, String rawKey, String sourceId)
-	{
-		if (record == null || record.durationMillis == null || sourceId == null) return null;
-		String activityId = activityId(record, rawKey, null);
-		if (activityId == null || !isSupported(activityId, "time", record.teamSize)) return null;
-		return details(activityId, "time", record.durationMillis, record.teamSize, "personal_best", sourceId);
-	}
-
 	/** Maps a directly observed raid completion even when it did not set a PB. */
 	public java.util.Map<String, Object> detailsForRaidCompletion(AnchorModels.PbRecord record, String rawKey,
 		String sourceId)
