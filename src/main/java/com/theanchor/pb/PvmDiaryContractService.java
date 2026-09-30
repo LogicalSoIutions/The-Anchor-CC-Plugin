@@ -92,7 +92,8 @@ public class PvmDiaryContractService
 		if ("sol heredit".equals(raw) || "fortis colosseum".equals(raw)) return "colosseum";
 		if ("tzkal-zuk".equals(raw) || "inferno".equals(raw)) return "inferno";
 		if ("tztok-jad".equals(raw) || "tzhaar fight cave".equals(raw)) return "fight-caves";
-		if ("corrupted gauntlet".equals(raw) || "the corrupted gauntlet".equals(raw)) return "cg";
+		if ("corrupted gauntlet".equals(raw) || "the corrupted gauntlet".equals(raw)
+			|| "gauntlet".equals(raw) || "the gauntlet".equals(raw)) return "cg";
 
 		Integer exactTeamSize = exactTeamSize(raw);
 		if (exactTeamSize == null) return null;

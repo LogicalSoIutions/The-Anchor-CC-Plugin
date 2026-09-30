@@ -66,6 +66,10 @@ public class PersonalBestServiceTest
 			"Your TzKal-Zuk kill count is: 7."));
 		assertNull(PersonalBestService.specialActivityFromKillCount(
 			"Your Vorkath kill count is: 100."));
+		assertEquals("Gauntlet", PersonalBestService.specialActivityFromKillCount(
+			"Your Gauntlet completion count is: 100."));
+		assertEquals("Fortis Colosseum", PersonalBestService.specialActivityFromCompletion(
+			"You have completed the Fortis Colosseum."));
 	}
 
 	@Test public void detectsSpecialActivityNewPersonalBestDuration()
@@ -75,6 +79,8 @@ public class PersonalBestServiceTest
 		assertEquals(3690.2, PersonalBestService.newPersonalBestDuration(
 			"Duration: 1:01:30.20 (new personal best)."), 0.001);
 		assertNull(PersonalBestService.newPersonalBestDuration("Duration: 30:18.60"));
+		assertEquals(1_200.0, PersonalBestService.observedActivityDuration("Colosseum duration: 20:00.00."), 0.001);
+		assertEquals(1_200.0, PersonalBestService.observedActivityDuration("Duration: 20:00.00"), 0.001);
 	}
 
 	@Test public void parsesNonPbCoxCompletionForDiaryEvidence()
@@ -95,9 +101,15 @@ public class PersonalBestServiceTest
 		assertEquals(Integer.valueOf(3), cox.teamSize);
 		assertEquals(Long.valueOf(720000L), cox.durationMillis);
 		assertEquals(Long.valueOf(990000L), PersonalBestService.raidCompletionDurationMillis(
+			"Total completion time: 16:30.00. Personal best: 15:42.00"));
+		assertNull(PersonalBestService.raidCompletionDurationMillis(
 			"Completion time: 16:30.00. Personal best: 15:42.00"));
+		assertNull(PersonalBestService.raidCompletionDurationMillis(
+			"Challenge completion time: 06:30.00. Personal best: 05:42.00"));
 		assertEquals("Theatre of Blood Hard Mode", PersonalBestService.raidActivityFromCompletionMessage(
 			"Your Theatre of Blood: Hard Mode completion count is: 12."));
+		assertEquals("Theatre of Blood", PersonalBestService.raidActivityFromCompletionMessage(
+			"Theatre of Blood total completion time: 26:00.00."));
 		assertEquals("Theatre of Blood Hard Mode", PersonalBestService.raidActivityFromCompletionMessage(
 			"Wave 'The Final Challenge' (Hard Mode) complete!"));
 		assertEquals("Tombs of Amascut Expert Mode", PersonalBestService.raidActivityFromCompletionMessage(
@@ -195,7 +207,7 @@ public class PersonalBestServiceTest
 		org.mockito.ArgumentCaptor<String> fingerprints = org.mockito.ArgumentCaptor.forClass(String.class);
 		verify(pipeline, times(2)).capture(eq("diary"), fingerprints.capture(), any(AnchorModels.Source.class),
 			isNull(), anyMap(), any(AnchorModels.Party.class));
-		assertTrue(fingerprints.getAllValues().contains("Theatre of Blood Hard Mode|hard|3|overall|null|1200000"));
+		assertTrue(fingerprints.getAllValues().contains("Theatre of Blood Hard Mode|hard|3|overall|null|1560000"));
 		assertTrue(fingerprints.getAllValues().contains("Tombs of Amascut Expert Mode|expert|1|overall|null|1560000"));
 	}
 
@@ -260,7 +272,7 @@ public class PersonalBestServiceTest
 		when(rawPb.getNewValue()).thenReturn("1208.4");
 		service.onConfigChanged(rawPb);
 		service.onChatMessage(chat("Your Sol Heredit kill count is: 26."));
-		service.onChatMessage(chat("Colosseum duration: 19:40.80 (new personal best)"));
+		service.onChatMessage(chat("Colosseum duration: 19:40.80."));
 
 		verify(pipeline).capture(eq("diary"), eq("Fortis Colosseum|null|1|overall|null|1180800"),
 			any(AnchorModels.Source.class), isNull(), argThat(details -> "colosseum".equals(details.get("activityId"))), same(soloParty));

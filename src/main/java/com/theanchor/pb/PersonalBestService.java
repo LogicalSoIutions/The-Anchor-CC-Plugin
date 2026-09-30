@@ -28,11 +28,9 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ChatMessage;
-import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
-import net.runelite.api.ScriptID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -48,8 +46,12 @@ public class PersonalBestService
 	private static final Pattern RECORD = Pattern.compile("^Fastest (?<descriptor>.+): (?<value>-|[0-9:]+(?:\\.[0-9]+)?)$");
 	private static final Pattern TEAM = Pattern.compile("(\\d+)\\+? player", Pattern.CASE_INSENSITIVE);
 	private static final Pattern SPECIAL_ACTIVITY_KILL_COUNT = Pattern.compile(
-		"^Your (?<boss>TzTok-Jad|TzKal-Zuk|Sol Heredit|(?:The )?Corrupted Gauntlet) "
+		"^Your (?<boss>TzTok-Jad|TzKal-Zuk|Sol Heredit|(?:The )?Corrupted Gauntlet|Gauntlet) "
 			+ "(?:kill |completion )?count is: [0-9,]+\\.?$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern SPECIAL_ACTIVITY_COMPLETION = Pattern.compile(
+		"^(?:Congratulations!?\\s*)?(?:You have )?(?:completed|defeated|killed) (?:the )?"
+			+ "(?<boss>Fortis Colosseum|Colosseum|Inferno|TzKal-Zuk|TzHaar Fight Cave|Fight Caves|"
+			+ "The Corrupted Gauntlet|Corrupted Gauntlet|Gauntlet|Sol Heredit|TzTok-Jad)\\.?$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern NEW_PB_DURATION = Pattern.compile(
 		"^Duration:?\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)\\.?\\s*\\(new personal best\\)\\.?$",
 		Pattern.CASE_INSENSITIVE);
@@ -61,17 +63,14 @@ public class PersonalBestService
 	private static final Pattern COX_COMPLETION_COUNT = Pattern.compile(
 		"^Your completed Chambers of Xeric(?<challenge> Challenge Mode)? count is: [0-9,]+\\.?$",
 		Pattern.CASE_INSENSITIVE);
-	private static final Pattern RAID_COMPLETION_DURATION = Pattern.compile(
-		"(?<!total\\s)completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s)",
-		Pattern.CASE_INSENSITIVE);
 	private static final Pattern TOTAL_RAID_COMPLETION_DURATION = Pattern.compile(
-		"total\\s+completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s)",
+		"\\btotal\\s+completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s|$)",
 		Pattern.CASE_INSENSITIVE);
 	private static final Pattern TOB_HARD_MODE_COMPLETION = Pattern.compile(
 		"^Wave 'The Final Challenge' \\(Hard Mode\\) complete!?$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern OBSERVED_ACTIVITY_DURATION = Pattern.compile(
 		"(?:Fight |Challenge |Corrupted challenge |Colosseum )?duration:?\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)"
-			+ "(?:\\.\\s*Personal best:|\\s*\\(new personal best\\))",
+			+ "(?:\\.\\s*Personal best:\\s*[0-9:]+(?:\\.[0-9]+)?|\\s*\\(new personal best\\)|[.]?$)",
 		Pattern.CASE_INSENSITIVE);
 	private static final Pattern DOOM_COMPLETION_TITLE = Pattern.compile("^Level\\s+(?<level>[1-9][0-9]*)\\s+Complete!$",
 		Pattern.CASE_INSENSITIVE);
@@ -108,8 +107,7 @@ public class PersonalBestService
 	private String pendingSpecialActivity;
 	private long pendingSpecialActivityAt;
 	private String pendingRaidActivity;
-	/** ToB diary entries use the raid completion time, not the total completion time. */
-	private Long pendingRaidCompletionDurationMillis;
+	/** Raid diary entries use total completion time. */
 	private Long pendingRaidTotalDurationMillis;
 	private Integer pendingRaidTeamSize;
 	private Integer pendingRaidInvocation;
@@ -123,7 +121,6 @@ public class PersonalBestService
 	{
 		pendingSpecialActivity = null;
 		pendingRaidActivity = null;
-		pendingRaidCompletionDurationMillis = null;
 		pendingRaidTotalDurationMillis = null;
 		pendingRaidAt = 0;
 		pendingCoxCompletion = null;
@@ -151,6 +148,12 @@ public class PersonalBestService
 		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) return;
 		String rawMessage = event.getMessage().replaceAll("(?i)<br\\s*/?>", " ");
 		String message = Text.removeTags(rawMessage).replace('\u00A0', ' ').replaceAll("\\s+", " ").trim();
+		Matcher doomCompletion = DOOM_COMPLETION_TITLE.matcher(message);
+		if (doomCompletion.matches())
+		{
+			captureCompletedDoomDelve(Integer.parseInt(doomCompletion.group("level")));
+			return;
+		}
 		AnchorModels.PbRecord completion = coxCompletionRecord(message);
 		if (completion != null)
 		{
@@ -168,6 +171,10 @@ public class PersonalBestService
 				capturePendingCoxCompletion();
 				return;
 			}
+			if (System.currentTimeMillis() - pendingCoxCompletionAt > COX_COMPLETION_CONFIRMATION_TIMEOUT_MILLIS)
+			{
+				capturePendingCoxCompletion();
+			}
 		}
 
 		String raidActivity = raidActivityFromCompletionMessage(message);
@@ -180,12 +187,6 @@ public class PersonalBestService
 				? client.getVarbitValue(VarbitID.TOA_CLIENT_RAID_LEVEL) : null;
 			pendingRaidAt = System.currentTimeMillis();
 		}
-		Long raidCompletionDuration = completionTimeMillis(message);
-		if (raidCompletionDuration != null)
-		{
-			pendingRaidCompletionDurationMillis = raidCompletionDuration;
-			pendingRaidAt = System.currentTimeMillis();
-		}
 		Long totalRaidDuration = totalCompletionTimeMillis(message);
 		if (totalRaidDuration != null)
 		{
@@ -194,10 +195,19 @@ public class PersonalBestService
 		}
 		if (tryCapturePendingRaid()) return;
 		String activity = specialActivityFromKillCount(message);
-		if (activity != null)
+		if (activity == null) activity = specialActivityFromCompletion(message);
+		if (activity != null && message.toLowerCase(Locale.ROOT).contains("complete"))
 		{
 			pendingSpecialActivity = activity;
 			pendingSpecialActivityAt = System.currentTimeMillis();
+		}
+		if (activity != null)
+		{
+			if (!message.toLowerCase(Locale.ROOT).contains("complete"))
+			{
+				pendingSpecialActivity = activity;
+				pendingSpecialActivityAt = System.currentTimeMillis();
+			}
 			return;
 		}
 
@@ -207,7 +217,14 @@ public class PersonalBestService
 		long age = System.currentTimeMillis() - pendingSpecialActivityAt;
 		if (observedSeconds != null && pending != null && age >= 0 && age <= SPECIAL_ACTIVITY_TIMEOUT_MILLIS)
 			captureObservedSoloActivity(pending, observedSeconds);
-		if (seconds == null) { if (observedSeconds != null) pendingSpecialActivity = null; return; }
+		if (seconds == null)
+		{
+			if (observedSeconds != null)
+			{
+				pendingSpecialActivity = null;
+			}
+			return;
+		}
 		pendingSpecialActivity = null;
 		if (pending == null || age < 0 || age > SPECIAL_ACTIVITY_TIMEOUT_MILLIS) return;
 
@@ -227,7 +244,21 @@ public class PersonalBestService
 		if (boss.equalsIgnoreCase("TzTok-Jad")) return "TzHaar Fight Cave";
 		if (boss.equalsIgnoreCase("TzKal-Zuk")) return "Inferno";
 		if (boss.equalsIgnoreCase("Sol Heredit")) return "Fortis Colosseum";
-		return "Corrupted Gauntlet";
+		return boss.toLowerCase(Locale.ROOT).contains("corrupted") ? "Corrupted Gauntlet" : "Gauntlet";
+	}
+
+	static String specialActivityFromCompletion(String message)
+	{
+		if (message == null) return null;
+		Matcher matcher = SPECIAL_ACTIVITY_COMPLETION.matcher(message.trim());
+		if (!matcher.matches()) return null;
+		String boss = matcher.group("boss");
+		if (boss.equalsIgnoreCase("TzTok-Jad") || boss.equalsIgnoreCase("Fight Caves")
+			|| boss.equalsIgnoreCase("TzHaar Fight Cave")) return "TzHaar Fight Cave";
+		if (boss.equalsIgnoreCase("TzKal-Zuk") || boss.equalsIgnoreCase("Inferno")) return "Inferno";
+		if (boss.equalsIgnoreCase("Sol Heredit") || boss.equalsIgnoreCase("Colosseum")
+			|| boss.equalsIgnoreCase("Fortis Colosseum")) return "Fortis Colosseum";
+		return boss.toLowerCase(Locale.ROOT).contains("corrupted") ? "Corrupted Gauntlet" : "Gauntlet";
 	}
 
 	static Double newPersonalBestDuration(String message)
@@ -274,17 +305,7 @@ public class PersonalBestService
 
 	static Long raidCompletionDurationMillis(String message)
 	{
-		Long completion = completionTimeMillis(message);
-		return completion != null ? completion : totalCompletionTimeMillis(message);
-	}
-
-	private static Long completionTimeMillis(String message)
-	{
-		if (message == null) return null;
-		Matcher matcher = RAID_COMPLETION_DURATION.matcher(message);
-		if (!matcher.find()) return null;
-		Double seconds = parseTime(matcher.group("time"));
-		return seconds == null ? null : Math.round(seconds * 1000);
+		return totalCompletionTimeMillis(message);
 	}
 
 	private static Long totalCompletionTimeMillis(String message)
@@ -300,8 +321,11 @@ public class PersonalBestService
 	{
 		if (message == null) return null;
 		if (TOB_HARD_MODE_COMPLETION.matcher(message.trim()).matches()) return "Theatre of Blood Hard Mode";
-		if (!message.toLowerCase(Locale.ROOT).contains("count is:")) return null;
 		String lower = message.toLowerCase(Locale.ROOT);
+		boolean completionSignal = lower.contains("count is:") || lower.contains("raid is complete")
+			|| lower.contains("raid complete") || lower.contains("completed the raid")
+			|| lower.contains("raid completion") || lower.contains("total completion time");
+		if (!completionSignal) return null;
 		if (lower.contains("theatre of blood"))
 			return lower.contains("hard mode") ? "Theatre of Blood Hard Mode" : "Theatre of Blood";
 		if (lower.contains("tombs of amascut"))
@@ -314,9 +338,7 @@ public class PersonalBestService
 		long age = System.currentTimeMillis() - pendingRaidAt;
 		if (pendingRaidActivity == null || pendingRaidTeamSize == null
 			|| age < 0 || age > RAID_COMPLETION_TIMEOUT_MILLIS) return false;
-		Long duration = pendingRaidActivity.startsWith("Theatre of Blood")
-			? pendingRaidCompletionDurationMillis
-			: pendingRaidTotalDurationMillis != null ? pendingRaidTotalDurationMillis : pendingRaidCompletionDurationMillis;
+		Long duration = pendingRaidTotalDurationMillis;
 		if (duration == null) return false;
 		AnchorModels.PbRecord record = new AnchorModels.PbRecord();
 		record.activity = pendingRaidActivity;
@@ -326,7 +348,6 @@ public class PersonalBestService
 		else if (pendingRaidActivity.contains("Expert Mode")) record.variant = "expert";
 		Integer invocation = pendingRaidInvocation;
 		pendingRaidActivity = null;
-		pendingRaidCompletionDurationMillis = null;
 		pendingRaidTotalDurationMillis = null;
 		pendingRaidTeamSize = null;
 		pendingRaidInvocation = null;
@@ -351,21 +372,6 @@ public class PersonalBestService
 		source.name = record.activity;
 		pipeline.capture("diary", recordKey(record) + '|' + record.durationMillis,
 			source, null, details, party);
-	}
-
-	/**
-	 * Matches RuneLite's Loot Tracker: this script fires after the player claims
-	 * Doom loot, while the completion dialog still contains the completed level.
-	 */
-	@Subscribe public void onScriptPreFired(ScriptPreFired event)
-	{
-		if (event.getScriptId() != ScriptID.DOM_LOOT_CLAIM) return;
-		Widget frame = client.getWidget(InterfaceID.DomEndLevelUi.FRAME);
-		Widget title = frame == null ? null : frame.getChild(1);
-		String text = title == null ? null : Text.removeTags(title.getText()).trim();
-		Matcher matcher = text == null ? null : DOOM_COMPLETION_TITLE.matcher(text);
-		if (matcher == null || !matcher.matches()) return;
-		captureCompletedDoomDelve(Integer.parseInt(matcher.group("level")));
 	}
 
 	private void captureCompletedDoomDelve(int completedDoomDelve)
@@ -556,6 +562,11 @@ public class PersonalBestService
 	private AnchorModels.Party verifiedDiaryParty(AnchorModels.PbRecord record)
 	{
 		if (record == null || record.teamSize == null) return null;
+		if (record.teamSize == 1)
+		{
+			AnchorModels.Party solo = parties.snapshot(record.activity, true);
+			return solo != null && solo.detectedPartySize == 1 ? solo : null;
+		}
 		AnchorModels.Party party = parties.snapshot(record.activity);
 		if (party == null || party.detectedPartySize != record.teamSize.intValue()) return null;
 		if (record.teamSize > 1 && !"high".equals(party.confidence)) return null;
