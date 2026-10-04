@@ -66,6 +66,9 @@ public class PersonalBestService
 	private static final Pattern TOTAL_RAID_COMPLETION_DURATION = Pattern.compile(
 		"\\btotal\\s+completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s|$)",
 		Pattern.CASE_INSENSITIVE);
+	private static final Pattern TOB_COMPLETION_DURATION = Pattern.compile(
+		"(?:^|\\bTheatre of Blood(?::?\\s+Hard Mode)?\\s+)completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s|$)",
+		Pattern.CASE_INSENSITIVE);
 	private static final Pattern TOB_HARD_MODE_COMPLETION = Pattern.compile(
 		"^Wave 'The Final Challenge' \\(Hard Mode\\) complete!?$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern OBSERVED_ACTIVITY_DURATION = Pattern.compile(
@@ -107,8 +110,9 @@ public class PersonalBestService
 	private String pendingSpecialActivity;
 	private long pendingSpecialActivityAt;
 	private String pendingRaidActivity;
-	/** Raid diary entries use total completion time. */
+	/** ToA uses total time; both ToB modes use completion time. */
 	private Long pendingRaidTotalDurationMillis;
+	private Long pendingTobDurationMillis;
 	private Integer pendingRaidTeamSize;
 	private Integer pendingRaidInvocation;
 	private long pendingRaidAt;
@@ -122,6 +126,7 @@ public class PersonalBestService
 		pendingSpecialActivity = null;
 		pendingRaidActivity = null;
 		pendingRaidTotalDurationMillis = null;
+		pendingTobDurationMillis = null;
 		pendingRaidAt = 0;
 		pendingCoxCompletion = null;
 		pendingCoxCompletionAt = 0;
@@ -191,6 +196,12 @@ public class PersonalBestService
 		if (totalRaidDuration != null)
 		{
 			pendingRaidTotalDurationMillis = totalRaidDuration;
+			pendingRaidAt = System.currentTimeMillis();
+		}
+		Long tobDuration = tobCompletionTimeMillis(message);
+		if (tobDuration != null)
+		{
+			pendingTobDurationMillis = tobDuration;
 			pendingRaidAt = System.currentTimeMillis();
 		}
 		if (tryCapturePendingRaid()) return;
@@ -317,6 +328,15 @@ public class PersonalBestService
 		return seconds == null ? null : Math.round(seconds * 1000);
 	}
 
+	static Long tobCompletionTimeMillis(String message)
+	{
+		if (message == null) return null;
+		Matcher matcher = TOB_COMPLETION_DURATION.matcher(message);
+		if (!matcher.find()) return null;
+		Double seconds = parseTime(matcher.group("time"));
+		return seconds == null ? null : Math.round(seconds * 1000);
+	}
+
 	static String raidActivityFromCompletionMessage(String message)
 	{
 		if (message == null) return null;
@@ -338,7 +358,8 @@ public class PersonalBestService
 		long age = System.currentTimeMillis() - pendingRaidAt;
 		if (pendingRaidActivity == null || pendingRaidTeamSize == null
 			|| age < 0 || age > RAID_COMPLETION_TIMEOUT_MILLIS) return false;
-		Long duration = pendingRaidTotalDurationMillis;
+		Long duration = pendingRaidActivity.startsWith("Theatre of Blood")
+			? pendingTobDurationMillis : pendingRaidTotalDurationMillis;
 		if (duration == null) return false;
 		AnchorModels.PbRecord record = new AnchorModels.PbRecord();
 		record.activity = pendingRaidActivity;
@@ -349,6 +370,7 @@ public class PersonalBestService
 		Integer invocation = pendingRaidInvocation;
 		pendingRaidActivity = null;
 		pendingRaidTotalDurationMillis = null;
+		pendingTobDurationMillis = null;
 		pendingRaidTeamSize = null;
 		pendingRaidInvocation = null;
 		captureRaidCompletion(record, invocation);

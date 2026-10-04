@@ -102,9 +102,19 @@ public class PersonalBestServiceTest
 		assertEquals(Long.valueOf(720000L), cox.durationMillis);
 		assertEquals(Long.valueOf(990000L), PersonalBestService.raidCompletionDurationMillis(
 			"Total completion time: 16:30.00. Personal best: 15:42.00"));
+		assertEquals(Long.valueOf(1648200L), PersonalBestService.raidCompletionDurationMillis(
+			"Tombs of Amascut: Expert Mode total completion time: 27:28.20. Personal best: 23:36.60"));
 		assertNull(PersonalBestService.raidCompletionDurationMillis(
 			"Completion time: 16:30.00. Personal best: 15:42.00"));
 		assertNull(PersonalBestService.raidCompletionDurationMillis(
+			"Challenge completion time: 06:30.00. Personal best: 05:42.00"));
+		assertEquals(Long.valueOf(990000L), PersonalBestService.tobCompletionTimeMillis(
+			"Completion time: 16:30.00. Personal best: 15:42.00"));
+		assertEquals(Long.valueOf(990000L), PersonalBestService.tobCompletionTimeMillis(
+			"Theatre of Blood: Hard Mode completion time: 16:30.00. Personal best: 15:42.00"));
+		assertNull(PersonalBestService.tobCompletionTimeMillis(
+			"Total completion time: 16:30.00. Personal best: 15:42.00"));
+		assertNull(PersonalBestService.tobCompletionTimeMillis(
 			"Challenge completion time: 06:30.00. Personal best: 05:42.00"));
 		assertEquals("Theatre of Blood Hard Mode", PersonalBestService.raidActivityFromCompletionMessage(
 			"Your Theatre of Blood: Hard Mode completion count is: 12."));
@@ -114,6 +124,8 @@ public class PersonalBestServiceTest
 			"Wave 'The Final Challenge' (Hard Mode) complete!"));
 		assertEquals("Tombs of Amascut Expert Mode", PersonalBestService.raidActivityFromCompletionMessage(
 			"Your Tombs of Amascut: Expert Mode completion count is: 42."));
+		assertEquals("Tombs of Amascut Expert Mode", PersonalBestService.raidActivityFromCompletionMessage(
+			"Tombs of Amascut: Expert Mode total completion time: 27:28.20. Personal best: 23:36.60"));
 	}
 
 	@Test public void capturesNonPbCoxCompletionAsDiarySubmission() throws Exception
@@ -192,7 +204,7 @@ public class PersonalBestServiceTest
 		inject(service, "diaryContract", diaryContract);
 		inject(service, "parties", parties);
 
-		service.onChatMessage(chat("Theatre of Blood completion time: 20:00.00. Personal best: 19:00.00"));
+		service.onChatMessage(chat("Theatre of Blood: Hard Mode completion time: 20:00.00. Personal best: 19:00.00"));
 		service.onChatMessage(chat("Total completion time: 26:00.00. Personal best: 25:00.00"));
 		service.onChatMessage(chat("Your Theatre of Blood: Hard Mode completion count is: 12."));
 		service.onChatMessage(chat("Total completion time: 26:00.00. Personal best: 25:00.00"));
@@ -207,8 +219,30 @@ public class PersonalBestServiceTest
 		org.mockito.ArgumentCaptor<String> fingerprints = org.mockito.ArgumentCaptor.forClass(String.class);
 		verify(pipeline, times(2)).capture(eq("diary"), fingerprints.capture(), any(AnchorModels.Source.class),
 			isNull(), anyMap(), any(AnchorModels.Party.class));
-		assertTrue(fingerprints.getAllValues().contains("Theatre of Blood Hard Mode|hard|3|overall|null|1560000"));
+		assertTrue(fingerprints.getAllValues().contains("Theatre of Blood Hard Mode|hard|3|overall|null|1200000"));
 		assertTrue(fingerprints.getAllValues().contains("Tombs of Amascut Expert Mode|expert|1|overall|null|1560000"));
+	}
+
+	@Test public void regularTobUsesCompletionTimeInsteadOfTotalTime() throws Exception
+	{
+		PersonalBestService service = new PersonalBestService();
+		EventPipeline pipeline = mock(EventPipeline.class);
+		PvmDiaryContractService diaryContract = mock(PvmDiaryContractService.class);
+		PartyTracker parties = mock(PartyTracker.class);
+		AnchorModels.Party party = new AnchorModels.Party(); party.detectedPartySize = 3; party.confidence = "high";
+		when(parties.snapshot("Theatre of Blood")).thenReturn(party);
+		when(diaryContract.detailsForObservedResult(any(), eq("theatre of blood 3 players"), isNull(), anyString()))
+			.thenReturn(new java.util.LinkedHashMap<>(java.util.Map.of("activityId", "tob-trio")));
+		inject(service, "pipeline", pipeline);
+		inject(service, "diaryContract", diaryContract);
+		inject(service, "parties", parties);
+
+		service.onChatMessage(chat("Completion time: 20:00.00. Personal best: 19:00.00"));
+		service.onChatMessage(chat("Total completion time: 26:00.00. Personal best: 25:00.00"));
+		service.onChatMessage(chat("Your Theatre of Blood completion count is: 12."));
+
+		verify(pipeline).capture(eq("diary"), eq("Theatre of Blood|null|3|overall|null|1200000"),
+			any(AnchorModels.Source.class), isNull(), anyMap(), same(party));
 	}
 
 	@Test public void capturesFightCavesAndInfernoPbsAsSubmissions() throws Exception
