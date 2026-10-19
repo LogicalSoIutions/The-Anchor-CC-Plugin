@@ -336,7 +336,8 @@ public class EventPipeline
 		{
 			if (remaining.decrementAndGet() == 0) raidGroupsBeingSubmitted.remove(groupId);
 		};
-		for (EvidenceStore.Record record : eligible) autoSubmit(record, party, release);
+		for (EvidenceStore.Record record : eligible)
+			autoSubmit(record, "diary".equals(record.metadata.eventType) ? record.metadata.party : party, release);
 	}
 
 	private boolean shouldAutoSubmit(EvidenceStore.Record record)
@@ -344,6 +345,8 @@ public class EventPipeline
 		if (!config.autoSubmitEnabled() || record == null || record.metadata == null
 			|| record.metadata.context == null) return false;
 		String type = record.metadata.eventType;
+		if ("diary".equals(type) && (record.metadata.party == null
+			|| record.metadata.party.detectedPartySize != 1 || record.metadata.party.submittedPartySize != 1)) return false;
 		if ("loot".equals(type))
 		{
 			// Loot is automatic only when explicitly marked as valuable and the

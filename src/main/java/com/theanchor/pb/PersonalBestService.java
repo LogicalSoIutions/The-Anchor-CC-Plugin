@@ -379,7 +379,8 @@ public class PersonalBestService
 
 	private void captureRaidCompletion(AnchorModels.PbRecord record, Integer invocation)
 	{
-		AnchorModels.Party party = verifiedDiaryParty(record);
+		AnchorModels.Party party = "Chambers of Xeric".equals(record.activity)
+			? PartyTracker.withCompletionSize(parties.snapshot(record.activity), record.teamSize) : verifiedDiaryParty(record);
 		if (party == null) return;
 		String sourceId = UUID.randomUUID().toString();
 		String rawKey = record.activity.toLowerCase(Locale.ROOT)
@@ -388,7 +389,7 @@ public class PersonalBestService
 		Map<String, Object> details = diaryContract.detailsForObservedResult(record, rawKey, invocation, sourceId);
 		if (details == null) return;
 		details.put("record", record);
-		details.put("autoSubmit", true);
+		details.put("autoSubmit", record.teamSize == 1);
 		AnchorModels.Source source = new AnchorModels.Source();
 		source.type = "raid";
 		source.name = record.activity;

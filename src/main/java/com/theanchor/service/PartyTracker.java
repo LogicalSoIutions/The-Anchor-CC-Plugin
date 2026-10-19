@@ -154,6 +154,26 @@ public class PartyTracker
 		return buildParty(1, localNameList(), "unknown", "low");
 	}
 
+	/** Completion chat proves the size even when roster detection is incomplete. */
+	public static AnchorModels.Party withCompletionSize(AnchorModels.Party observed, int teamSize)
+	{
+		if (observed != null && observed.detectedPartySize == teamSize) return observed;
+		AnchorModels.Party party = new AnchorModels.Party();
+		party.detectedPartySize = party.submittedPartySize = teamSize;
+		party.method = "raid_completion_chat";
+		// Preserve compatible observations without mutating the cached raid snapshot.
+		if (observed != null && observed.detectedClanMemberCount + observed.detectedNonClanMemberCount <= teamSize
+			&& observed.members.size() <= teamSize)
+		{
+			party.detectedClanMemberCount = party.submittedClanMemberCount = observed.detectedClanMemberCount;
+			party.detectedNonClanMemberCount = party.submittedNonClanMemberCount = observed.detectedNonClanMemberCount;
+			party.members.addAll(observed.members);
+			party.submittedMembers.addAll(observed.members);
+			party.clanMemberNames.addAll(observed.clanMemberNames);
+		}
+		return party;
+	}
+
 	public static boolean isIndividualRaidReward(String sourceName, String itemName)
 	{
 		if (sourceName == null || itemName == null) return false;

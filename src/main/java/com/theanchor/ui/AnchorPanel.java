@@ -60,7 +60,6 @@ import javax.swing.JScrollPane;
 import javax.swing.Scrollable;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
-import javax.swing.JViewport;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -192,8 +191,8 @@ public class AnchorPanel extends PluginPanel {
 
 		// Content area with CardLayout
 		contentPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		contentPanel.add(scroll(home), "Home");
-		contentPanel.add(scroll(submissions), "Submissions");
+		contentPanel.add(scroll(home, true), "Home");
+		contentPanel.add(scroll(submissions, true), "Submissions");
 		contentCards.show(contentPanel, "Home");
 
 		add(header, BorderLayout.NORTH);
@@ -1281,6 +1280,10 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	static JScrollPane scroll(JPanel panel) {
+		return scroll(panel, false);
+	}
+
+	static JScrollPane scroll(JPanel panel, boolean reserveScrollbarSpace) {
 		ViewportWidthPanel viewport = new ViewportWidthPanel();
 		viewport.add(panel, BorderLayout.NORTH);
 		JScrollPane scroll = new JScrollPane(viewport);
@@ -1289,6 +1292,9 @@ public class AnchorPanel extends PluginPanel {
 		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
 		scroll.getViewport().setOpaque(true);
 		scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		// Keep the sidebar width stable when Extra Settings changes the available height.
+		scroll.setVerticalScrollBarPolicy(reserveScrollbarSpace
+				? JScrollPane.VERTICAL_SCROLLBAR_ALWAYS : JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
 		scroll.getVerticalScrollBar().setUnitIncrement(16);
 		return scroll;
 	}
@@ -1321,7 +1327,8 @@ public class AnchorPanel extends PluginPanel {
 
 		@Override
 		public boolean getScrollableTracksViewportHeight() {
-			return getParent() instanceof JViewport && getPreferredSize().height < getParent().getHeight();
+			// Preserve the cards' natural height instead of switching between fitting and scrolling.
+			return false;
 		}
 	}
 
