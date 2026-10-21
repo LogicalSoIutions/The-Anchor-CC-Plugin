@@ -17,13 +17,13 @@ RuneLite Plugin Hub project for The Anchor clan.
 
 ## Local development
 
-### Temporary raid / clan diagnostics
+### Clan / raid debug
 
-Enable **The Anchor → Testing → Clan / raid debug (temporary)** before entering a raid. No loot drop is needed. The default is off.
+Enable **The Anchor → Testing → Clan / raid debug** before entering a raid. No loot drop is needed. The default is off.
 
-Search `.runelite/logs/client.log` for `Raid party debug`. While enabled, diagnostics sample every 10 game ticks (about 6 seconds), log changes, and repeat unchanged state every 50 ticks (about 30 seconds). Reports include raw raid rosters (including The Fractured Archive), party size, clan/guest/unknown counts, visible players' clan flags, and whether the clan roster is ready. If no raid is detected, the raw roster fields still appear. Output stays in local RuneLite logs and does not create evidence or API requests. Turn the setting off after the run.
+Search `.runelite/logs/client.log` for `Raid party debug`. While enabled, diagnostics sample every 10 game ticks (about 6 seconds), log changes, and repeat unchanged state every 50 ticks (about 30 seconds). Reports include raw raid rosters (including The Fractured Archive's eight slot states and names), party size, clan/guest/unknown counts, visible players' clan flags, and whether the clan roster is ready. They also identify the player's WorldView, game state, and whether evidence features are active. The reporter runs independently of feature activation and roster polling, and logs reporting errors before retrying. If no raid is detected, the raw roster fields still appear. Output stays in local RuneLite logs and does not create evidence or API requests. Turn the setting off after the run.
 
-To remove periodic diagnostics, delete `RaidPartyDiagnostics.java`, its field and tick call in `PartyTracker`, and `raidDiagnosticReport()`. The existing `debugRaidPartyDetection` config key is retained for compatibility.
+Archive roster decoding follows live cache scripts 10034/10039/10042: nonzero member states at varbits 16387–16394 indicate occupied slots, paired with names at varcs 1573–1580. Empty or literal `null` names remain unknown. Script 10047 shows that varbit 16386 controls the lobby's Party / Step Inside button; it does not prove raid presence. Tracking retains the last roster for up to 10 ticks of empty slots during a transition and stores the completed roster when the final Ocellus form (NPC 16677) dies.
 
 ### Running locally
 

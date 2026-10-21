@@ -4,7 +4,7 @@ import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Temporary local diagnostics. No screenshots, evidence records, or API requests. */
+/** Local raid and clan diagnostics. No screenshots, evidence records, or API requests. */
 final class RaidPartyDiagnostics
 {
 	private static final Logger log = LoggerFactory.getLogger(RaidPartyDiagnostics.class);
@@ -25,7 +25,16 @@ final class RaidPartyDiagnostics
 		}
 		if (ticksUntilSample-- > 0) return;
 		ticksUntilSample = SAMPLE_TICKS - 1;
-		String current = report.get();
+		String current;
+		try
+		{
+			current = report.get();
+		}
+		catch (RuntimeException error)
+		{
+			log.warn("Raid party debug [periodic-error]: report unavailable; retrying next sample", error);
+			return;
+		}
 		if (!current.equals(lastReport) || ++unchangedSamples >= HEARTBEAT_SAMPLES)
 		{
 			log.info("Raid party debug [periodic]: {}", current);

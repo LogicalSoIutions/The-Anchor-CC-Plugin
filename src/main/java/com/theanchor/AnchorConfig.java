@@ -26,7 +26,7 @@ public interface AnchorConfig extends Config
 	@ConfigSection(name = "Bingo Overlay", description = "Active bingo event overlay", position = 4)
 	String BINGO_OVERLAY = "bingoOverlay";
 
-	@ConfigSection(name = "Testing", description = "Temporary diagnostics for The Anchor", position = 5)
+	@ConfigSection(name = "Testing", description = "Debugging and diagnostics for The Anchor", position = 5)
 	String TESTING = "testing";
 
 	@ConfigItem(keyName = "authenticationCode", name = "Authentication code",
@@ -109,7 +109,7 @@ public interface AnchorConfig extends Config
 		section = TESTING, position = 0)
 	default boolean debugRequestJournal() { return false; }
 
-	@ConfigItem(keyName = "debugRaidPartyDetection", name = "Clan / raid debug (temporary)",
+	@ConfigItem(keyName = "debugRaidPartyDetection", name = "Clan / raid debug",
 		description = "Log party size, clan membership, and raw raid rosters during raids, including The Fractured Archive; no loot required. See RuneLite logs/client.log",
 		section = TESTING, position = 1)
 	default boolean debugRaidPartyDetection() { return false; }

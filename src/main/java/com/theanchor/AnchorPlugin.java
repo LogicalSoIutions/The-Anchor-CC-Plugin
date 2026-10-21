@@ -163,6 +163,7 @@ public class AnchorPlugin extends Plugin
 
 	@Subscribe public void onGameTick(GameTick event)
 	{
+		parties.debugRaidTick(featuresActive);
 		tryOnLoggedIn();
 		if (featuresActive) eventAlerts.onGameTick();
 	}
@@ -200,7 +201,11 @@ public class AnchorPlugin extends Plugin
 
 	private void updateFeatureActivation()
 	{
+		// Region loading can temporarily remove the local player. Preserve feature
+		// subscriptions and raid state through that transition; login/hop still reset normally.
+		if (client.getGameState() == GameState.LOADING) return;
 		String name = currentName();
+		if (client.getGameState() == GameState.LOGGED_IN && (name == null || name.isBlank())) return;
 		boolean shouldBeActive = client.getGameState() == GameState.LOGGED_IN
 			&& name != null && !name.isBlank()
 			&& data.connection() == AnchorDataService.Connection.CONNECTED

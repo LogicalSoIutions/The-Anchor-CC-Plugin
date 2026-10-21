@@ -51,6 +51,10 @@ public class PartyTracker
 	// Numeric IDs keep compatibility with clients predating the generated constants.
 	private static final int TFA_MEMBER_NAME = 1573;
 	private static final int TFA_PARTY_STATUS = 16386;
+	// Cache scripts 10034/10039: each nonzero state is an occupied raid-panel slot.
+	// 16386 is only the lobby button state (script 10047), not raid presence.
+	private static final int TFA_MEMBER_STATE = 16387;
+	private static final int TFA_ROSTER_CLEAR_TICKS = 10;
 
 	@Inject private Client client;
 	@Inject private AnchorConfig config;
@@ -71,14 +75,14 @@ public class PartyTracker
 	private long completedRaidAt;
 	private boolean awaitingCompletedRosterClear;
 	private String lastDebugRosterSignature;
-	// Temporary diagnostics: remove this field, the tick call, and RaidPartyDiagnostics.java together.
+	private int archiveEmptyTicks;
+	// Driven by AnchorPlugin even when feature listeners are inactive.
 	private final RaidPartyDiagnostics raidDiagnostics = new RaidPartyDiagnostics();
 
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
 		pollRaidRoster();
-		raidDiagnostics.onGameTick(config != null && config.debugRaidPartyDetection(), this::raidDiagnosticReport);
 		Player local = client.getLocalPlayer();
 		List<Player> instancePlayers = instancedWorldViewPlayers();
 		NPC current = local != null && local.getInteracting() instanceof NPC
@@ -133,7 +137,7 @@ public class PartyTracker
 			if (raidKey(sourceName).equals("the fractured archive") && sameRaid(sourceName, activeRaidSource))
 			{
 				List<String> liveNames = raidNames(sourceName);
-				if (!liveNames.isEmpty()) updateActiveRaid(sourceName, liveNames);
+				if (!liveNames.isEmpty() || archivePartyCount() > 0) updateActiveRaid(sourceName, liveNames);
 			}
 			AnchorModels.Party stored = storedRaidParty(sourceName);
 			if (stored != null)
@@ -206,9 +210,12 @@ public class PartyTracker
 		if (!(actor instanceof NPC)) return;
 		String source = finalBossRaid(((NPC) actor).getName());
 		if (source == null) return;
+		// Ocellus has multiple NPC forms; only the final form proves completion.
+		if (raidKey(source).equals("the fractured archive") && ((NPC) actor).getId() != 16677) return;
 		observeRaidWorldView(source);
 		List<String> finalNames = raidNames(source);
-		if (!finalNames.isEmpty()) updateActiveRaid(source, finalNames);
+		if (!finalNames.isEmpty() || (raidKey(source).equals("the fractured archive") && archivePartyCount() > 0))
+			updateActiveRaid(source, finalNames);
 		List<String> confirmedNames = sameRaid(source, activeRaidSource) ? activeRaidNames : finalNames;
 		completedRaidSource = source;
 		completedRaidNames = List.copyOf(confirmedNames);
@@ -254,6 +261,7 @@ public class PartyTracker
 			activeRaidPartySize = 0;
 			raidStatusSource = null;
 			raidPlayerClanStatus.clear();
+			archiveEmptyTicks = 0;
 			clearCompletedRaid();
 			awaitingCompletedRosterClear = false;
 			recentRaidSource = null;
@@ -313,8 +321,10 @@ public class PartyTracker
 
 	private void pollRaidRoster()
 	{
+		int archiveCount = archivePartyCount();
+		archiveEmptyTicks = archiveCount > 0 ? 0 : Math.min(TFA_ROSTER_CLEAR_TICKS, archiveEmptyTicks + 1);
 		if (sameRaid(activeRaidSource, "The Fractured Archive")
-			&& client.getVarbitValue(TFA_PARTY_STATUS) == 0)
+			&& archiveEmptyTicks >= TFA_ROSTER_CLEAR_TICKS)
 		{
 			activeRaidSource = null;
 			activeRaidNames = List.of();
@@ -331,11 +341,12 @@ public class PartyTracker
 		{
 			observeRaidWorldView(activeRaidSource);
 			List<String> names = raidNames(activeRaidSource);
-			if (!names.isEmpty()) updateActiveRaid(activeRaidSource, names);
+			if (!names.isEmpty() || (raidKey(activeRaidSource).equals("the fractured archive") && archiveCount > 0))
+				updateActiveRaid(activeRaidSource, names);
 			return;
 		}
 
-		if (client.getVarbitValue(TFA_PARTY_STATUS) > 0)
+		if (archiveCount > 0)
 		{
 			startPolledRaid("The Fractured Archive", raidNames("The Fractured Archive"));
 			return;
@@ -351,7 +362,8 @@ public class PartyTracker
 
 	private void startPolledRaid(String source, List<String> names)
 	{
-		if (names.isEmpty() || (awaitingCompletedRosterClear && sameRaid(source, completedRaidSource))) return;
+		boolean occupiedArchive = raidKey(source).equals("the fractured archive") && archivePartyCount() > 0;
+		if ((names.isEmpty() && !occupiedArchive) || (awaitingCompletedRosterClear && sameRaid(source, completedRaidSource))) return;
 		if (sameRaid(source, completedRaidSource)) clearCompletedRaid();
 		observeRaidWorldView(source);
 		updateActiveRaid(source, names);
@@ -368,7 +380,7 @@ public class PartyTracker
 		if (source.startsWith("theatre of blood"))
 			return varcNames(TOB_MEMBER_NAME, 5).isEmpty();
 		if (source.equals("the fractured archive"))
-			return client.getVarbitValue(TFA_PARTY_STATUS) == 0 || varcNames(TFA_MEMBER_NAME, 8).isEmpty();
+			return archiveEmptyTicks >= TFA_ROSTER_CLEAR_TICKS;
 		return true;
 	}
 
@@ -399,7 +411,7 @@ public class PartyTracker
 		// Named roster entries are the authoritative size. The CoX party-size
 		// varbit can briefly contain stale data while the instance is changing.
 		// Only use it later as a fallback when no names are available.
-		activeRaidPartySize = raidKey(source).equals("the fractured archive") ? cleaned.size()
+		activeRaidPartySize = raidKey(source).equals("the fractured archive") ? raidCount(source, cleaned.size())
 			: Math.max(activeRaidPartySize, cleaned.size());
 		if (source.equals(activeRaidSource) && cleaned.equals(activeRaidNames)) return;
 		activeRaidSource = source;
@@ -454,6 +466,7 @@ public class PartyTracker
 	{
 		String value = BossRegistry.normalize(clean(name));
 		if (value.startsWith("the maiden of sugadinti")) return "Theatre of Blood";
+		if (value.equals("archive guardian")) return "The Fractured Archive";
 		if (value.equals("akkha") || value.startsWith("ba ba") || value.startsWith("baba")
 			|| value.equals("kephri") || value.equals("zebak")) return "Tombs of Amascut";
 		return null;
@@ -576,20 +589,22 @@ public class PartyTracker
 		if (source.startsWith("chambers of xeric")) return chambersNames();
 		if (source.startsWith("tombs of amascut")) return varcNames(TOA_MEMBER_NAME, 8);
 		if (source.startsWith("theatre of blood")) return varcNames(TOB_MEMBER_NAME, 5);
-		if (source.equals("the fractured archive")) return dedupe(varcNames(TFA_MEMBER_NAME, 8));
+		if (source.equals("the fractured archive")) return archiveNames();
 		return List.of();
 	}
 
-	/** Exact named roster size; never use the unknown-raid solo fallback for PBs. */
+	/** Exact named roster or Archive occupied-slot count; never use the unknown-raid solo fallback for PBs. */
 	public Integer confirmedRaidTeamSize(String sourceName)
 	{
 		if (!BossRegistry.isRaid(sourceName)) return null;
-		if (raidKey(sourceName).equals("the fractured archive") && client.getVarbitValue(TFA_PARTY_STATUS) > 0)
+		if (raidKey(sourceName).equals("the fractured archive"))
 		{
-			List<String> names = raidNames(sourceName);
-			if (!names.isEmpty()) return names.size();
+			int count = archivePartyCount();
+			if (count > 0) return count;
 		}
 		AnchorModels.Party stored = storedRaidParty(sourceName);
+		if (raidKey(sourceName).equals("the fractured archive") && activeRaidNames.isEmpty()
+			&& completedRaidNames.isEmpty()) return null;
 		if (stored != null) return stored.detectedPartySize;
 		List<String> names = raidNames(sourceName);
 		return names.isEmpty() ? null : names.size();
@@ -602,7 +617,29 @@ public class PartyTracker
 			return namedCount > 0 ? namedCount : client.getVarbitValue(VarbitID.RAIDS_CLIENT_PARTYSIZE);
 		if (source.startsWith("tombs of amascut"))
 			return namedCount > 0 ? namedCount : toaPartyCount();
+		if (source.equals("the fractured archive")) return Math.max(namedCount, archivePartyCount());
 		return namedCount;
+	}
+
+	private int archivePartyCount()
+	{
+		int count = 0;
+		for (int slot = 0; slot < 8; slot++)
+			if (client.getVarbitValue(TFA_MEMBER_STATE + slot) > 0) count++;
+		return count;
+	}
+
+	private List<String> archiveNames()
+	{
+		List<String> names = new ArrayList<>();
+		for (int slot = 0; slot < 8; slot++)
+		{
+			if (client.getVarbitValue(TFA_MEMBER_STATE + slot) == 0) continue;
+			String name = clean(client.getVarcStrValue(TFA_MEMBER_NAME + slot));
+			// Script 10039 treats empty and literal "null" as unnamed slots.
+			if (!name.isEmpty() && !name.equalsIgnoreCase("null") && !name.equals("-")) names.add(name);
+		}
+		return dedupe(names);
 	}
 
 	private int toaPartyCount()
@@ -676,7 +713,7 @@ public class PartyTracker
 		Player local = client.getLocalPlayer();
 		boolean archive = raidKey(source).equals("the fractured archive");
 		if (local == null || local.getWorldView() == null) return;
-		if (archive ? client.getVarbitValue(TFA_PARTY_STATUS) == 0 : !client.isInInstancedRegion()) return;
+		if (archive ? archivePartyCount() == 0 : !client.isInInstancedRegion()) return;
 		Set<String> rosterKeys = new HashSet<>();
 		if (archive)
 			for (String name : raidNames(source)) rosterKeys.add(playerNameKey(name));
@@ -693,12 +730,19 @@ public class PartyTracker
 			}
 	}
 
+	/** Called by the plugin itself, independent of evidence feature activation and roster polling. */
+	public void debugRaidTick(boolean featuresActive)
+	{
+		raidDiagnostics.onGameTick(config != null && config.debugRaidPartyDetection(),
+			() -> "featuresActive=" + featuresActive + " gameState=" + client.getGameState() + " " + raidDiagnosticReport());
+	}
+
 	private String raidDiagnosticReport()
 	{
 		String source = raidContextSource();
 		if (source == null)
 		{
-			if (client.getVarbitValue(TFA_PARTY_STATUS) > 0 || !raidNames("The Fractured Archive").isEmpty())
+			if (archivePartyCount() > 0)
 				source = "The Fractured Archive";
 			else if (client.getVarbitValue(VarbitID.RAIDS_CLIENT_INDUNGEON) > 0)
 				source = "Chambers of Xeric";
@@ -712,8 +756,15 @@ public class PartyTracker
 			int count = raidCount(source, names.size());
 			party = buildParty(Math.max(1, count), names, "raid_party_debug", confidenceForRoster(count, names));
 		}
+		List<String> archiveSlots = new ArrayList<>();
+		for (int slot = 0; slot < 8; slot++)
+			archiveSlots.add(slot + ":state=" + client.getVarbitValue(TFA_MEMBER_STATE + slot)
+				+ ",name=" + clean(client.getVarcStrValue(TFA_MEMBER_NAME + slot)));
 		return raidDebugState(source, null) + " party={" + partyDebugState(party) + "}"
 			+ " tfaPartyStatus=" + client.getVarbitValue(TFA_PARTY_STATUS)
+			+ " tfaSlots=" + archiveSlots
+			+ " tfaOccupiedCount=" + archivePartyCount()
+			+ " tfaEmptyTicks=" + archiveEmptyTicks
 			+ " tfaNames=" + raidNames("The Fractured Archive")
 			+ " tobNames=" + raidNames("Theatre of Blood")
 			+ " toaNames=" + raidNames("Tombs of Amascut")
@@ -753,6 +804,8 @@ public class PartyTracker
 			? client.getVarbitValue(VarbitID.RAIDS_CLIENT_PARTYSIZE) : -1;
 		return "source=" + source
 			+ " inInstance=" + client.isInInstancedRegion()
+			+ " localWorldView=" + (local == null || local.getWorldView() == null ? null : local.getWorldView().getId())
+			+ " localWorldViewInstance=" + (local != null && local.getWorldView() != null && local.getWorldView().isInstance())
 			+ " local=" + (local == null ? null : local.getName())
 			+ " names=" + (names == null ? raidNames(source) : names)
 			+ " activeNames=" + activeRaidNames
@@ -761,7 +814,7 @@ public class PartyTracker
 			+ " worldViewPlayers=" + worldViewPlayers
 			+ " cachedClanFlags=" + raidPlayerClanStatus
 			+ " clanRosterReady=" + clanRosterReady(clanMemberKeys(clan))
-			+ " clanMembers=" + clanMembers;
+			+ " clanRosterSize=" + clanMembers.size();
 	}
 
 	private static String partyDebugState(AnchorModels.Party party)
