@@ -47,6 +47,10 @@ public class PartyTracker
 	private static final long COMPLETED_RAID_MILLIS = 10 * 60_000L;
 	private static final int TOA_MEMBER_NAME = 1099;
 	private static final int TOB_MEMBER_NAME = 330;
+	// RuneLite gamevals TFA_CLIENT_NAME0 and TFA_CLIENT_PARTYSTATUS.
+	// Numeric IDs keep compatibility with clients predating the generated constants.
+	private static final int TFA_MEMBER_NAME = 1573;
+	private static final int TFA_PARTY_STATUS = 16386;
 
 	@Inject private Client client;
 	@Inject private AnchorConfig config;
@@ -62,14 +66,19 @@ public class PartyTracker
 	private final Map<String, Boolean> raidPlayerClanStatus = new LinkedHashMap<>();
 	private AnchorModels.Party completedRaidParty;
 	private String completedRaidSource;
+	private List<String> completedRaidNames = List.of();
+	private final Map<String, Boolean> completedRaidClanStatus = new LinkedHashMap<>();
 	private long completedRaidAt;
 	private boolean awaitingCompletedRosterClear;
 	private String lastDebugRosterSignature;
+	// Temporary diagnostics: remove this field, the tick call, and RaidPartyDiagnostics.java together.
+	private final RaidPartyDiagnostics raidDiagnostics = new RaidPartyDiagnostics();
 
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
 		pollRaidRoster();
+		raidDiagnostics.onGameTick(config != null && config.debugRaidPartyDetection(), this::raidDiagnosticReport);
 		Player local = client.getLocalPlayer();
 		List<Player> instancePlayers = instancedWorldViewPlayers();
 		NPC current = local != null && local.getInteracting() instanceof NPC
@@ -120,6 +129,12 @@ public class PartyTracker
 
 		if (BossRegistry.isRaid(sourceName))
 		{
+			observeRaidWorldView(sourceName);
+			if (raidKey(sourceName).equals("the fractured archive") && sameRaid(sourceName, activeRaidSource))
+			{
+				List<String> liveNames = raidNames(sourceName);
+				if (!liveNames.isEmpty()) updateActiveRaid(sourceName, liveNames);
+			}
 			AnchorModels.Party stored = storedRaidParty(sourceName);
 			if (stored != null)
 			{
@@ -196,6 +211,13 @@ public class PartyTracker
 		if (!finalNames.isEmpty()) updateActiveRaid(source, finalNames);
 		List<String> confirmedNames = sameRaid(source, activeRaidSource) ? activeRaidNames : finalNames;
 		completedRaidSource = source;
+		completedRaidNames = List.copyOf(confirmedNames);
+		completedRaidClanStatus.clear();
+		completedRaidClanStatus.putAll(raidPlayerClanStatus);
+		Set<String> clanNames = clanMemberKeys(client.getClanSettings());
+		if (clanRosterReady(clanNames))
+			for (String name : confirmedNames)
+				completedRaidClanStatus.put(playerNameKey(name), clanNames.contains(playerNameKey(name)));
 		int detectedSize = Math.max(activeRaidPartySize, raidCount(source, confirmedNames.size()));
 		completedRaidParty = buildParty(detectedSize, confirmedNames,
 			"raid_party_final_boss", confidenceForRoster(detectedSize, confirmedNames));
@@ -232,9 +254,7 @@ public class PartyTracker
 			activeRaidPartySize = 0;
 			raidStatusSource = null;
 			raidPlayerClanStatus.clear();
-			completedRaidParty = null;
-			completedRaidSource = null;
-			completedRaidAt = 0;
+			clearCompletedRaid();
 			awaitingCompletedRosterClear = false;
 			recentRaidSource = null;
 			recentRaidSourceAt = 0;
@@ -293,6 +313,13 @@ public class PartyTracker
 
 	private void pollRaidRoster()
 	{
+		if (sameRaid(activeRaidSource, "The Fractured Archive")
+			&& client.getVarbitValue(TFA_PARTY_STATUS) == 0)
+		{
+			activeRaidSource = null;
+			activeRaidNames = List.of();
+			activeRaidPartySize = 0;
+		}
 		if (awaitingCompletedRosterClear && completedRosterCleared())
 		{
 			awaitingCompletedRosterClear = false;
@@ -308,6 +335,11 @@ public class PartyTracker
 			return;
 		}
 
+		if (client.getVarbitValue(TFA_PARTY_STATUS) > 0)
+		{
+			startPolledRaid("The Fractured Archive", raidNames("The Fractured Archive"));
+			return;
+		}
 		if (client.getVarbitValue(VarbitID.RAIDS_CLIENT_INDUNGEON) > 0)
 		{
 			startPolledRaid("Chambers of Xeric", chambersNames());
@@ -321,6 +353,7 @@ public class PartyTracker
 	{
 		if (names.isEmpty() || (awaitingCompletedRosterClear && sameRaid(source, completedRaidSource))) return;
 		if (sameRaid(source, completedRaidSource)) clearCompletedRaid();
+		observeRaidWorldView(source);
 		updateActiveRaid(source, names);
 	}
 
@@ -334,6 +367,8 @@ public class PartyTracker
 			return toaPartyCount() == 0 || varcNames(TOA_MEMBER_NAME, 8).isEmpty();
 		if (source.startsWith("theatre of blood"))
 			return varcNames(TOB_MEMBER_NAME, 5).isEmpty();
+		if (source.equals("the fractured archive"))
+			return client.getVarbitValue(TFA_PARTY_STATUS) == 0 || varcNames(TFA_MEMBER_NAME, 8).isEmpty();
 		return true;
 	}
 
@@ -341,13 +376,15 @@ public class PartyTracker
 	{
 		completedRaidParty = null;
 		completedRaidSource = null;
+		completedRaidNames = List.of();
+		completedRaidClanStatus.clear();
 		completedRaidAt = 0;
 	}
 
 	private void updateActiveRaid(String source, List<String> names)
 	{
 		List<String> cleaned = dedupe(names);
-		if (sameRaid(source, activeRaidSource))
+		if (sameRaid(source, activeRaidSource) && !raidKey(source).equals("the fractured archive"))
 		{
 			List<String> combined = new ArrayList<>(activeRaidNames);
 			combined.addAll(cleaned);
@@ -362,7 +399,8 @@ public class PartyTracker
 		// Named roster entries are the authoritative size. The CoX party-size
 		// varbit can briefly contain stale data while the instance is changing.
 		// Only use it later as a fallback when no names are available.
-		activeRaidPartySize = Math.max(activeRaidPartySize, cleaned.size());
+		activeRaidPartySize = raidKey(source).equals("the fractured archive") ? cleaned.size()
+			: Math.max(activeRaidPartySize, cleaned.size());
 		if (source.equals(activeRaidSource) && cleaned.equals(activeRaidNames)) return;
 		activeRaidSource = source;
 		activeRaidNames = cleaned;
@@ -381,6 +419,12 @@ public class PartyTracker
 			&& sameRaid(sourceName, completedRaidSource)
 			&& System.currentTimeMillis() - completedRaidAt <= COMPLETED_RAID_MILLIS)
 		{
+			// Clan settings can finish loading after the final boss dies. Retain
+			// every raid name so those members can still be classified at loot time.
+			if (!completedRaidNames.isEmpty())
+				return buildParty(completedRaidParty.detectedPartySize, completedRaidNames,
+					completedRaidParty.method, confidenceForRoster(completedRaidParty.detectedPartySize, completedRaidNames),
+					completedRaidClanStatus);
 			return completedRaidParty;
 		}
 		return null;
@@ -400,6 +444,7 @@ public class PartyTracker
 	{
 		String value = BossRegistry.normalize(clean(name));
 		if (value.startsWith("great olm")) return "Chambers of Xeric";
+		if (value.equals("ocellus")) return "The Fractured Archive";
 		if (value.startsWith("verzik vitur")) return "Theatre of Blood";
 		if (value.startsWith("tumeken's warden") || value.startsWith("tumekens warden")) return "Tombs of Amascut";
 		return null;
@@ -441,6 +486,12 @@ public class PartyTracker
 
 	private AnchorModels.Party buildParty(int detectedSize, List<String> names, String method, String confidence)
 	{
+		return buildParty(detectedSize, names, method, confidence, raidPlayerClanStatus);
+	}
+
+	private AnchorModels.Party buildParty(int detectedSize, List<String> names, String method, String confidence,
+		Map<String, Boolean> observedClanStatus)
+	{
 		ClanSettings clan = client.getClanSettings();
 		Set<String> clanNames = clanMemberKeys(clan);
 		boolean clanRosterReady = clanRosterReady(clanNames);
@@ -451,7 +502,7 @@ public class PartyTracker
 			// is a guest. Once the full local clan roster is available, absence is
 			// a confirmed non-clan result.
 			Boolean observedStatus = (method.startsWith("raid_") || "instance_party".equals(method))
-				? raidPlayerClanStatus.get(playerNameKey(name)) : null;
+				? observedClanStatus.get(playerNameKey(name)) : null;
 			// Prefer the complete clan-settings roster. The per-player flag is the
 			// fallback for raid members that are visible in the instance but whose
 			// names are not available in the settings lookup yet.
@@ -460,8 +511,9 @@ public class PartyTracker
 				: observedStatus;
 			members.add(new MemberSnapshot(name, clanMember));
 		}
-		return snapshotFromData(detectedSize, members, method,
-			clanRosterReady || !raidPlayerClanStatus.isEmpty() ? confidence : "low");
+		boolean fullyClassified = !members.isEmpty() && members.size() == detectedSize
+			&& members.stream().allMatch(member -> member.clanMember != null);
+		return snapshotFromData(detectedSize, members, method, fullyClassified ? confidence : "low");
 	}
 
 	private Set<String> clanMemberKeys(ClanSettings clan)
@@ -524,7 +576,23 @@ public class PartyTracker
 		if (source.startsWith("chambers of xeric")) return chambersNames();
 		if (source.startsWith("tombs of amascut")) return varcNames(TOA_MEMBER_NAME, 8);
 		if (source.startsWith("theatre of blood")) return varcNames(TOB_MEMBER_NAME, 5);
+		if (source.equals("the fractured archive")) return dedupe(varcNames(TFA_MEMBER_NAME, 8));
 		return List.of();
+	}
+
+	/** Exact named roster size; never use the unknown-raid solo fallback for PBs. */
+	public Integer confirmedRaidTeamSize(String sourceName)
+	{
+		if (!BossRegistry.isRaid(sourceName)) return null;
+		if (raidKey(sourceName).equals("the fractured archive") && client.getVarbitValue(TFA_PARTY_STATUS) > 0)
+		{
+			List<String> names = raidNames(sourceName);
+			if (!names.isEmpty()) return names.size();
+		}
+		AnchorModels.Party stored = storedRaidParty(sourceName);
+		if (stored != null) return stored.detectedPartySize;
+		List<String> names = raidNames(sourceName);
+		return names.isEmpty() ? null : names.size();
 	}
 
 	private int raidCount(String sourceName, int namedCount)
@@ -606,10 +674,51 @@ public class PartyTracker
 	{
 		beginRaidStatus(source);
 		Player local = client.getLocalPlayer();
-		if (local == null || local.getWorldView() == null || !client.isInInstancedRegion()) return;
+		boolean archive = raidKey(source).equals("the fractured archive");
+		if (local == null || local.getWorldView() == null) return;
+		if (archive ? client.getVarbitValue(TFA_PARTY_STATUS) == 0 : !client.isInInstancedRegion()) return;
+		Set<String> rosterKeys = new HashSet<>();
+		if (archive)
+			for (String name : raidNames(source)) rosterKeys.add(playerNameKey(name));
 		for (Player player : local.getWorldView().players())
 			if (player != null && player.getName() != null)
-				raidPlayerClanStatus.put(playerNameKey(player.getName()), player.isClanMember());
+			{
+				String key = playerNameKey(player.getName());
+				if (archive && !rosterKeys.contains(key)) continue;
+				boolean clanMember = player.isClanMember();
+				raidPlayerClanStatus.put(key, clanMember);
+				if (sameRaid(source, completedRaidSource) && completedRaidNames.stream()
+					.anyMatch(name -> playerNameKey(name).equals(key)))
+					completedRaidClanStatus.put(key, clanMember);
+			}
+	}
+
+	private String raidDiagnosticReport()
+	{
+		String source = raidContextSource();
+		if (source == null)
+		{
+			if (client.getVarbitValue(TFA_PARTY_STATUS) > 0 || !raidNames("The Fractured Archive").isEmpty())
+				source = "The Fractured Archive";
+			else if (client.getVarbitValue(VarbitID.RAIDS_CLIENT_INDUNGEON) > 0)
+				source = "Chambers of Xeric";
+			else if (toaPartyCount() > 0) source = "Tombs of Amascut";
+			else if (!raidNames("Theatre of Blood").isEmpty()) source = "Theatre of Blood";
+		}
+		AnchorModels.Party party = source == null ? null : storedRaidParty(source);
+		if (source != null && party == null)
+		{
+			List<String> names = raidNames(source);
+			int count = raidCount(source, names.size());
+			party = buildParty(Math.max(1, count), names, "raid_party_debug", confidenceForRoster(count, names));
+		}
+		return raidDebugState(source, null) + " party={" + partyDebugState(party) + "}"
+			+ " tfaPartyStatus=" + client.getVarbitValue(TFA_PARTY_STATUS)
+			+ " tfaNames=" + raidNames("The Fractured Archive")
+			+ " tobNames=" + raidNames("Theatre of Blood")
+			+ " toaNames=" + raidNames("Tombs of Amascut")
+			+ " completedSource=" + completedRaidSource
+			+ " completedNames=" + completedRaidNames;
 	}
 
 	private void debugRaidRoster(String reason, String source, List<String> names)
@@ -666,6 +775,7 @@ public class PartyTracker
 			+ ", detectedSize=" + party.detectedPartySize
 			+ ", clanCount=" + party.detectedClanMemberCount
 			+ ", nonClanCount=" + party.detectedNonClanMemberCount
+			+ ", unknownCount=" + Math.max(0, party.detectedPartySize - party.detectedClanMemberCount - party.detectedNonClanMemberCount)
 			+ ", members=" + members;
 	}
 

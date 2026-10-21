@@ -16,7 +16,7 @@ public final class BossRegistry
 		"chaos fanatic", "commander zilyana", "corporeal beast", "crazy archaeologist",
 		"general graardor", "giant mole", "kalphite queen", "king black dragon", "kreearra",
 		"kril tsutsaroth", "nex", "nightmare", "scurrius", "tempoross", "the hueycoatl",
-		"the royal titans", "theatre of blood", "theatre of blood hard mode", "tombs of amascut",
+		"the fractured archive", "the royal titans", "theatre of blood", "theatre of blood hard mode", "tombs of amascut",
 		"tombs of amascut expert mode", "vetion", "wintertodt", "yama"
 	);
 
@@ -30,13 +30,14 @@ public final class BossRegistry
 		"king black dragon", "kraken", "kreearra", "kril tsutsaroth", "lunar chests", "mad angel",
 		"maggot king", "mimic", "nex", "nightmare", "obor", "phantom muspah", "phosanis nightmare",
 		"sarachnis", "scorpia", "shellbane gryphon", "skotizo", "sol heredit", "spindel",
-		"tempoross", "the corrupted gauntlet", "the gauntlet", "the hueycoatl", "the leviathan",
+		"tempoross", "the corrupted gauntlet", "the fractured archive", "the gauntlet", "the hueycoatl", "the leviathan",
 		"the royal titans", "the whisperer", "theatre of blood", "theatre of blood hard mode",
 		"thermonuclear smoke devil", "tombs of amascut", "tombs of amascut expert mode", "tzkal zuk",
 		"tztok jad", "vardorvis", "venenatis", "vetion", "vorkath", "wintertodt", "yama", "zalcano", "zulrah"
 	);
 
 	private static final Map<String, String> ALIASES = Map.ofEntries(
+		Map.entry("fractured archive", "the fractured archive"),
 		Map.entry("barrows", "barrows chests"), Map.entry("lunar chest", "lunar chests"),
 		Map.entry("the mimic", "mimic"), Map.entry("the nightmare", "nightmare"),
 		Map.entry("dusk", "grotesque guardians"), Map.entry("dawn", "grotesque guardians"),
@@ -60,7 +61,8 @@ public final class BossRegistry
 	public static boolean isRaid(String source)
 	{
 		String value = normalize(source);
-		return value.startsWith("chambers of xeric") || value.startsWith("theatre of blood") || value.startsWith("tombs of amascut");
+		return value.startsWith("chambers of xeric") || value.startsWith("theatre of blood")
+			|| value.startsWith("tombs of amascut") || value.equals("the fractured archive");
 	}
 
 	static String normalize(String source)

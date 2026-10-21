@@ -17,7 +17,17 @@ RuneLite Plugin Hub project for The Anchor clan.
 
 ## Local development
 
-Run `gradlew.bat test` to compile and test, or `gradlew.bat run` to launch RuneLite in developer mode.
+### Temporary raid / clan diagnostics
+
+Enable **The Anchor → Testing → Clan / raid debug (temporary)** before entering a raid. No loot drop is needed. The default is off.
+
+Search `.runelite/logs/client.log` for `Raid party debug`. While enabled, diagnostics sample every 10 game ticks (about 6 seconds), log changes, and repeat unchanged state every 50 ticks (about 30 seconds). Reports include raw raid rosters (including The Fractured Archive), party size, clan/guest/unknown counts, visible players' clan flags, and whether the clan roster is ready. If no raid is detected, the raw roster fields still appear. Output stays in local RuneLite logs and does not create evidence or API requests. Turn the setting off after the run.
+
+To remove periodic diagnostics, delete `RaidPartyDiagnostics.java`, its field and tick call in `PartyTracker`, and `raidDiagnosticReport()`. The existing `debugRaidPartyDetection` config key is retained for compatibility.
+
+### Running locally
+
+Run `gradlew.bat clean build` to compile and package the plugin, or `gradlew.bat run` to launch RuneLite in developer mode. The development launcher lives in `src/dev`; there is no automated test suite.
 
 The production API origin is `https://the-anchor.cc`. During development, enable RuneLite's hidden settings and change the plugin API base URL.
 

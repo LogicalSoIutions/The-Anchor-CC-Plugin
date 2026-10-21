@@ -66,6 +66,10 @@ public class PersonalBestService
 	private static final Pattern TOTAL_RAID_COMPLETION_DURATION = Pattern.compile(
 		"\\btotal\\s+completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s|$)",
 		Pattern.CASE_INSENSITIVE);
+	private static final Pattern ARCHIVE_COMPLETION = Pattern.compile(
+		"^(?:The )?Fractured Archive: Total completion time: (?<time>[0-9:]+(?:\\.[0-9]+)?)"
+			+ "(?: \\(new personal best\\)|\\. Personal best: (?<best>[0-9:]+(?:\\.[0-9]+)?))\\.?$",
+		Pattern.CASE_INSENSITIVE);
 	private static final Pattern TOB_COMPLETION_DURATION = Pattern.compile(
 		"(?:^|\\bTheatre of Blood(?::?\\s+Hard Mode)?\\s+)completion time:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s|$)",
 		Pattern.CASE_INSENSITIVE);
@@ -93,6 +97,7 @@ public class PersonalBestService
 		return lower.startsWith("chambers of xeric")
 			|| lower.startsWith("theatre of blood")
 			|| lower.startsWith("tombs of amascut")
+			|| isFracturedArchiveKey(lower)
 			|| lower.startsWith("nightmare");
 	}
 	@Inject private Client client;
@@ -153,6 +158,7 @@ public class PersonalBestService
 		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) return;
 		String rawMessage = event.getMessage().replaceAll("(?i)<br\\s*/?>", " ");
 		String message = Text.removeTags(rawMessage).replace('\u00A0', ' ').replaceAll("\\s+", " ").trim();
+		if (captureArchiveCompletion(message)) return;
 		Matcher doomCompletion = DOOM_COMPLETION_TITLE.matcher(message);
 		if (doomCompletion.matches())
 		{
@@ -244,6 +250,34 @@ public class PersonalBestService
 		Double previous = known.put(key, seconds);
 		if (previous != null && seconds >= previous) return;
 		sync(java.util.Collections.singletonList(record), false, true, previous, false);
+	}
+
+	private boolean captureArchiveCompletion(String message)
+	{
+		Matcher matcher = ARCHIVE_COMPLETION.matcher(message);
+		if (!matcher.matches()) return false;
+		Integer teamSize = parties.confirmedRaidTeamSize("The Fractured Archive");
+		if (teamSize == null || teamSize < 1 || teamSize > 8)
+		{
+			log.warn("Fractured Archive completion observed without a named raid roster; skipping unscaled PB");
+			return true;
+		}
+		Double seconds = parseTime(matcher.group("time"));
+		Double best = matcher.group("best") == null ? seconds : parseTime(matcher.group("best"));
+		if (seconds == null || best == null) return true;
+		AnchorModels.PbRecord completion = diaryRecordFromKey("the fractured archive " + teamSize + " players", seconds);
+		captureRaidCompletion(completion, null);
+		// RuneLite does not yet write personalbest config for this raid. The game
+		// prints the existing PB on slower runs too, allowing catalogue recovery.
+		AnchorModels.PbRecord record = diaryRecordFromKey("the fractured archive " + teamSize + " players", best);
+		String key = recordKey(record);
+		Double previous = known.get(key);
+		if (previous == null || best < previous)
+		{
+			known.put(key, best);
+			sync(java.util.Collections.singletonList(record), false, matcher.group("best") == null, previous, false);
+		}
+		return true;
 	}
 
 	static String specialActivityFromKillCount(String message)
@@ -660,6 +694,7 @@ public class PersonalBestService
 		if (lower.startsWith("chambers of xeric")) record.activity = "Chambers of Xeric";
 		else if (lower.startsWith("theatre of blood")) record.activity = "Theatre of Blood";
 		else if (lower.startsWith("tombs of amascut")) record.activity = "Tombs of Amascut";
+		else if (isFracturedArchiveKey(lower)) record.activity = "The Fractured Archive";
 		if (lower.contains("challenge mode")) record.variant = "challenge_mode";
 		else if (lower.contains("hard mode")) record.variant = "hard";
 		else if (lower.contains("entry mode")) record.variant = "entry";
@@ -758,7 +793,14 @@ public class PersonalBestService
 		return lower.startsWith("chambers of xeric")
 			|| lower.startsWith("theatre of blood")
 			|| lower.startsWith("tombs of amascut")
+			|| isFracturedArchiveKey(lower)
 			|| lower.contains("nightmare");
+	}
+
+	private static boolean isFracturedArchiveKey(String lower)
+	{
+		return lower.equals("the fractured archive") || lower.startsWith("the fractured archive ")
+			|| lower.equals("fractured archive") || lower.startsWith("fractured archive ");
 	}
 
 	static void parseStatLine(String heading, String line, List<AnchorModels.PbRecord> result)
@@ -831,6 +873,8 @@ public class PersonalBestService
 
 	private static String canonical(String key)
 	{
+		if (key.equalsIgnoreCase("fractured archive") || key.equalsIgnoreCase("the fractured archive"))
+			return "The Fractured Archive";
 		String lower = key.toLowerCase(Locale.ROOT); if (lower.equals("the leviathan") || lower.equals("levi")) return "Leviathan"; if (lower.equals("duke")) return "Duke Sucellus"; if (lower.equals("the whisperer") || lower.equals("whisp")) return "Whisperer"; if (lower.equals("vard")) return "Vardorvis"; return key;
 	}
 

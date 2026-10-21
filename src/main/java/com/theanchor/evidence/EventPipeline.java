@@ -546,6 +546,7 @@ public class EventPipeline
 			if (normalized.startsWith("chambersofxeric")) return "chambersofxeric";
 			if (normalized.startsWith("theatreofblood")) return "theatreofblood";
 			if (normalized.startsWith("tombsofamascut")) return "tombsofamascut";
+			if (normalized.equals("thefracturedarchive") || normalized.equals("fracturedarchive")) return "fracturedarchive";
 		}
 		return normalized;
 	}

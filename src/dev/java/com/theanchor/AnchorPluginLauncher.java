@@ -1,5 +1,5 @@
 /*
- * Test structure adapted from PB Tracker Sync.
+ * Development launcher adapted from PB Tracker Sync.
  * See LICENSES/pb-tracker-sync-LICENSE.txt.
  */
 package com.theanchor;
@@ -7,7 +7,7 @@ package com.theanchor;
 import net.runelite.client.RuneLite;
 import net.runelite.client.externalplugins.ExternalPluginManager;
 
-public class AnchorPluginTest
+public class AnchorPluginLauncher
 {
 	public static void main(String[] args) throws Exception
 	{

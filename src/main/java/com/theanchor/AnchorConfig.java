@@ -109,8 +109,8 @@ public interface AnchorConfig extends Config
 		section = TESTING, position = 0)
 	default boolean debugRequestJournal() { return false; }
 
-	@ConfigItem(keyName = "debugRaidPartyDetection", name = "Raid party diagnostics",
-		description = "Log detailed CoX, ToB, and ToA party detection data while testing a real raid",
+	@ConfigItem(keyName = "debugRaidPartyDetection", name = "Clan / raid debug (temporary)",
+		description = "Log party size, clan membership, and raw raid rosters during raids, including The Fractured Archive; no loot required. See RuneLite logs/client.log",
 		section = TESTING, position = 1)
 	default boolean debugRaidPartyDetection() { return false; }
 
