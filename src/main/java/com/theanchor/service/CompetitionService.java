@@ -38,8 +38,8 @@ public final class CompetitionService
 		panel.kind = kind;
 		panel.title = comp.title;
 		panel.metric = comp.metric;
-		boolean isBotw = "BOTW".equalsIgnoreCase(kind);
-		if (isBotw)
+		boolean isKillCount = "BOTW".equalsIgnoreCase(kind) || "ROTM".equalsIgnoreCase(kind);
+		if (isKillCount)
 		{
 			panel.metricLabel = comp.bossName != null && !comp.bossName.isBlank() ? comp.bossName : formatMetricLabel(comp.metric);
 			panel.unit = "KC";

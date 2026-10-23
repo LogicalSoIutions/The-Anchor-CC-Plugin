@@ -35,6 +35,7 @@ public final class AnchorModels
 		public NextRank nextRank;
 		public CompetitionRank botwRank;
 		public CompetitionRank sotwRank;
+		public CompetitionRank rotmRank;
 	}
 
 	public static final class CompetitionRank
@@ -58,12 +59,14 @@ public final class AnchorModels
 	{
 		public CompetitionPair sotw;
 		public CompetitionPair botw;
+		public CompetitionPair rotm;
 	}
 
 	public static final class CompetitionPanels
 	{
 		public CompetitionPanel botw;
 		public CompetitionPanel sotw;
+		public CompetitionPanel rotm;
 		public String updatedAt;
 	}
 

@@ -113,6 +113,7 @@ public class AnchorPanel extends PluginPanel {
 	private final JPanel extraSettings = verticalPanel();
 	private JButton extraSettingsButton;
 	private boolean extraSettingsVisible;
+	private boolean rotmExpanded = true;
 	private boolean botwExpanded = true;
 	private boolean sotwExpanded = true;
 	private boolean pvmDiaryExpanded = true;
@@ -473,13 +474,16 @@ public class AnchorPanel extends PluginPanel {
 			home.add(Box.createVerticalStrut(8));
 		}
 		AnchorModels.CompetitionPanels competitions = data.competitionPanels();
+		AnchorModels.Standings standings = profile == null ? null : profile.standings;
+		String playerName = profile == null || profile.member == null ? null : profile.member.name;
+		home.add(competition("ROTM", competitions == null ? null : competitions.rotm, null,
+				standings == null ? null : standings.rotmRank, playerName, rotmExpanded));
+		home.add(Box.createVerticalStrut(8));
 		String weeklyTiming = sharedCompetitionTiming(competitions);
 		if (!weeklyTiming.isEmpty()) {
 			home.add(weeklyTimer(weeklyTiming));
 			home.add(Box.createVerticalStrut(8));
 		}
-		AnchorModels.Standings standings = profile == null ? null : profile.standings;
-		String playerName = profile == null || profile.member == null ? null : profile.member.name;
 		boolean authRequired = requiresCompetitionAuthentication(data.connection());
 		home.add(competition("BOTW", competitions == null ? null : competitions.botw,
 				authRequired ? data.unauthenticatedBotwImage() : data.botwImage(),
@@ -712,13 +716,21 @@ public class AnchorPanel extends PluginPanel {
 		if (!expanded)
 			return card;
 
-		int cardContentWidth = PANEL_WIDTH - 32;
-		BufferedImage scaledArtwork = scaleToWidth(image == null ? placeholderCompetition(kind) : image,
-				cardContentWidth);
-		JLabel artwork = new AspectRatioIconLabel();
-		artwork.setIcon(new ImageIcon(scaledArtwork));
-		artwork.setAlignmentX(Component.LEFT_ALIGNMENT);
-		card.add(artwork);
+		if ("ROTM".equals(kind) && competition != null) {
+			String raidName = competition.metricLabel == null || competition.metricLabel.isBlank()
+					? competition.title : competition.metricLabel;
+			card.add(muted(html(esc(raidName))));
+			if (!isUpcoming(competition))
+				card.add(muted(isFinished(competition) ? "Ended" : countdown(competition.endsAt)));
+		} else {
+			int cardContentWidth = PANEL_WIDTH - 32;
+			BufferedImage scaledArtwork = scaleToWidth(image == null ? placeholderCompetition(kind) : image,
+					cardContentWidth);
+			JLabel artwork = new AspectRatioIconLabel();
+			artwork.setIcon(new ImageIcon(scaledArtwork));
+			artwork.setAlignmentX(Component.LEFT_ALIGNMENT);
+			card.add(artwork);
+		}
 		card.add(Box.createVerticalStrut(5));
 		boolean upcoming = isUpcoming(competition);
 		boolean finished = isFinished(competition);
@@ -727,7 +739,7 @@ public class AnchorPanel extends PluginPanel {
 			return card;
 		}
 		if (upcoming) {
-			Color accent = "BOTW".equals(kind) ? BOTW_ACCENT : SOTW_ACCENT;
+			Color accent = competitionAccent(kind);
 			card.add(competitionSectionHeading("UPCOMING", accent));
 			card.add(Box.createVerticalStrut(3));
 			card.add(muted(startsCountdown(competition.startsAt)));
@@ -736,9 +748,10 @@ public class AnchorPanel extends PluginPanel {
 		List<AnchorModels.PanelLeader> leaders = competition.leaders == null ? java.util.Collections.emptyList()
 				: competition.leaders;
 		long leadingScore = leaders.stream().mapToLong(leader -> Math.max(0, leader.gained)).max().orElse(0);
-		Color accent = "BOTW".equals(kind) ? BOTW_ACCENT : SOTW_ACCENT;
-		boolean showPersonalProgress = !finished
-				|| (playerRank != null && playerRank.rank != null && playerRank.rank <= 3);
+		Color accent = competitionAccent(kind);
+		// ROTM standings are optional: the profile API currently only supplies weekly ranks.
+		boolean showPersonalProgress = (!"ROTM".equals(kind) || playerRank != null)
+				&& (!finished || (playerRank != null && playerRank.rank != null && playerRank.rank <= 3));
 		if (showPersonalProgress) {
 			card.add(competitionSectionHeading("YOUR PROGRESS", accent));
 			card.add(Box.createVerticalStrut(3));
@@ -775,8 +788,14 @@ public class AnchorPanel extends PluginPanel {
 		return card;
 	}
 
+	private static Color competitionAccent(String kind) {
+		return "ROTM".equals(kind) ? GOLD : "BOTW".equals(kind) ? BOTW_ACCENT : SOTW_ACCENT;
+	}
+
 	private void toggleCompetition(String kind) {
-		if ("BOTW".equals(kind))
+		if ("ROTM".equals(kind))
+			rotmExpanded = !rotmExpanded;
+		else if ("BOTW".equals(kind))
 			botwExpanded = !botwExpanded;
 		else
 			sotwExpanded = !sotwExpanded;

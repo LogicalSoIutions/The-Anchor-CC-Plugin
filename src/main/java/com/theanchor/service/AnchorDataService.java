@@ -122,6 +122,7 @@ public class AnchorDataService
 					if (resolved == null) resolved = new AnchorModels.CompetitionPanels();
 					resolved.botw = resolvePanel(resolved.botw, compResult.value.botw, "BOTW");
 					resolved.sotw = resolvePanel(resolved.sotw, compResult.value.sotw, "SOTW");
+					resolved.rotm = resolvePanel(resolved.rotm, compResult.value.rotm, "ROTM");
 				}
 				competitionPanels = resolved;
 				loadCompetitionImages(resolved);
