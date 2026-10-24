@@ -719,7 +719,7 @@ public class AnchorPanel extends PluginPanel {
 		if ("ROTM".equals(kind) && competition != null) {
 			String raidName = competition.metricLabel == null || competition.metricLabel.isBlank()
 					? competition.title : competition.metricLabel;
-			card.add(muted(html(esc(raidName))));
+			card.add(wrappedMuted(raidName));
 			if (!isUpcoming(competition))
 				card.add(muted(isFinished(competition) ? "Ended" : countdown(competition.endsAt)));
 		} else {
