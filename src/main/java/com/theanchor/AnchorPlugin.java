@@ -25,6 +25,7 @@ import com.theanchor.ui.BingoEventOverlay;
 import com.theanchor.ui.CollectionLogSyncOverlay;
 import com.theanchor.ui.CollectionLogAutoSync;
 import com.theanchor.ui.CollectionLogRefreshButton;
+import com.theanchor.ui.ClanWorldSorter;
 import com.theanchor.ui.EventAlertOverlay;
 import java.awt.Color;
 import java.awt.Graphics2D;
@@ -83,6 +84,7 @@ public class AnchorPlugin extends Plugin
 	@Inject private CollectionLogSyncOverlay collectionLogSyncOverlay;
 	@Inject private CollectionLogAutoSync collectionLogAutoSync;
 	@Inject private CollectionLogRefreshButton collectionLogRefreshButton;
+	@Inject private ClanWorldSorter clanWorldSorter;
 	@Inject private EventAlertService eventAlerts;
 	@Inject private EventAlertOverlay eventAlertOverlay;
 	@Inject private BingoEventOverlay bingoEventOverlay;
@@ -105,6 +107,8 @@ public class AnchorPlugin extends Plugin
 
 	@Override protected void startUp()
 	{
+		eventBus.register(clanWorldSorter);
+		clientThread.invokeLater(clanWorldSorter::refresh);
 		navigation = NavigationButton.builder().tooltip("The Anchor").icon(loadIcon()).priority(5).panel(panel).build(); toolbar.addNavigation(navigation);
 		overlayManager.add(collectionLogSyncOverlay);
 		overlayManager.add(eventAlertOverlay);
@@ -126,6 +130,8 @@ public class AnchorPlugin extends Plugin
 
 	@Override protected void shutDown()
 	{
+		eventBus.unregister(clanWorldSorter);
+		clientThread.invokeLater(clanWorldSorter::shutDown);
 		if (refreshTask != null) { refreshTask.cancel(false); refreshTask = null; }
 		if (progressTask != null) { progressTask.cancel(false); progressTask = null; }
 		deactivateFeatures();
