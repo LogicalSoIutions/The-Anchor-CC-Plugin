@@ -99,6 +99,7 @@ public class AnchorPanel extends PluginPanel {
 	private final AtomicBoolean refreshQueued = new AtomicBoolean();
 	private boolean submissionsLoading;
 	private boolean submissionsReloadRequested;
+	private SubmissionFilter submissionFilter = SubmissionFilter.ALL;
 	private final JLabel banner = new AspectRatioIconLabel();
 	private final JLabel avatar = new JLabel();
 	private final JLabel identity = new JLabel("Log in to RuneLite", SwingConstants.LEFT);
@@ -118,6 +119,21 @@ public class AnchorPanel extends PluginPanel {
 	private boolean sotwExpanded = true;
 	private boolean pvmDiaryExpanded = true;
 	private String activeTab = "Home";
+
+	private enum SubmissionFilter {
+		ALL("All", null), LOOT("Loot", "loot"), DIARY("Diary", "diary"), PBS("PBs", "personal_best"),
+		OTHER("Other", "other");
+
+		private final String label;
+		private final String category;
+
+		SubmissionFilter(String label, String category) {
+			this.label = label;
+			this.category = category;
+		}
+
+		@Override public String toString() { return label; }
+	}
 
 	@Inject
 	public AnchorPanel(AnchorDataService data, EvidenceStore evidence, EventPipeline pipeline,
@@ -836,12 +852,26 @@ public class AnchorPanel extends PluginPanel {
 
 	private void renderSubmissions(List<EvidenceStore.Record> records) {
 		submissions.removeAll();
-		if (records.isEmpty()) {
-			submissions.add(muted(
-					"Drops, personal bests, collection log entries, pets, and combat achievements will appear here."));
+		JComboBox<SubmissionFilter> filter = new JComboBox<>(SubmissionFilter.values());
+		filter.setSelectedItem(submissionFilter);
+		filter.setToolTipText("Show submissions by type");
+		filter.addActionListener(e -> {
+			submissionFilter = (SubmissionFilter) filter.getSelectedItem();
+			rebuildSubmissions();
+		});
+		submissions.add(fieldRow("Show", filter));
+		submissions.add(Box.createVerticalStrut(7));
+		List<EvidenceStore.Record> visible = new java.util.ArrayList<>();
+		for (EvidenceStore.Record record : records)
+			if (submissionFilter.category == null || submissionFilter.category.equals(submissionCategory(record)))
+				visible.add(record);
+		if (visible.isEmpty()) {
+			submissions.add(muted(records.isEmpty()
+					? "Drops, diary entries, personal bests, and other evidence will appear here."
+					: "No submissions match this filter."));
 			return;
 		}
-		for (List<EvidenceStore.Record> group : submissionGroups(records).values()) {
+		for (List<EvidenceStore.Record> group : submissionGroups(visible).values()) {
 			EvidenceStore.Record record = preferredRecord(group);
 			AnchorModels.EventStatus displayStatus = groupStatus(group);
 			JPanel card = card();
@@ -894,7 +924,11 @@ public class AnchorPanel extends PluginPanel {
 			}
 			if (displayStatus == AnchorModels.EventStatus.FAILED || displayStatus == AnchorModels.EventStatus.PENDING) {
 				JButton retry = actionButton("Retry", true);
-				retry.addActionListener(e -> runSubmissionAction(() -> pipeline.retryGroup(record)));
+				retry.addActionListener(e -> runSubmissionAction(() -> {
+					for (EvidenceStore.Record member : group)
+						if (member.status == AnchorModels.EventStatus.PENDING || member.status == AnchorModels.EventStatus.FAILED)
+							pipeline.upload(member, true);
+				}));
 				actionButtons.add(retry);
 			}
 			if (displayStatus == AnchorModels.EventStatus.DRAFT && canFinalize(group)) {
@@ -910,8 +944,11 @@ public class AnchorPanel extends PluginPanel {
 					String submissionNotes = notes.getText();
 					List<AnchorModels.PartyMember> partyMembers = partyMemberEditor == null ? List.of()
 							: partyMemberEditor.members();
-					runSubmissionAction(() -> pipeline.updateAndSubmitGroup(record, partySize, clanCount, nonClanCount,
-							partyMembers, submissionNotes));
+					runSubmissionAction(() -> {
+						for (EvidenceStore.Record member : group)
+							if (member.status == AnchorModels.EventStatus.DRAFT)
+								pipeline.updateAndSubmit(member, partySize, clanCount, nonClanCount, partyMembers, submissionNotes);
+					});
 				});
 				actionButtons.add(submit);
 			}
@@ -956,9 +993,19 @@ public class AnchorPanel extends PluginPanel {
 		for (EvidenceStore.Record record : records) {
 			String groupId = EventPipeline.submissionGroupId(record);
 			String key = groupId == null ? "event:" + record.metadata.eventId : "group:" + groupId;
+			// Keep diary and PB status/actions independent, even for one encounter.
+			String type = record.metadata.eventType;
+			if ("diary".equals(type) || "personal_best".equals(type)) key += ':' + type;
 			groups.computeIfAbsent(key, ignored -> new java.util.ArrayList<>()).add(record);
 		}
 		return groups;
+	}
+
+	private static String submissionCategory(EvidenceStore.Record record) {
+		String type = record.metadata.eventType;
+		if ("diary".equals(type) || "personal_best".equals(type)) return type;
+		if ("loot".equals(type) || "bingo".equals(type) || "collection_log".equals(type) || "pet".equals(type)) return "loot";
+		return "other";
 	}
 
 	private static EvidenceStore.Record preferredRecord(List<EvidenceStore.Record> group) {
@@ -1571,11 +1618,6 @@ public class AnchorPanel extends PluginPanel {
 			for (EvidenceStore.Record member : group)
 				if (member != null && member.metadata != null && member.metadata.eventType != null)
 					groupedTypes.add(member.metadata.eventType);
-		if (record.metadata.context != null) {
-			Object values = record.metadata.context.get("submissionTypes");
-			if (values instanceof Iterable)
-				for (Object value : (Iterable<?>) values) if (value != null) groupedTypes.add(String.valueOf(value));
-		}
 		if (groupedTypes.size() > 1) {
 			List<String> labels = new java.util.ArrayList<>();
 			if (groupedTypes.contains("bingo")) labels.add("BINGO");
@@ -1593,6 +1635,8 @@ public class AnchorPanel extends PluginPanel {
 				return "LOOT DROP";
 			case "personal_best":
 				return "PERSONAL BEST";
+			case "diary":
+				return "PVM DIARY";
 			case "collection_log":
 				return "COLLECTION LOG";
 			case "pet":
@@ -1615,8 +1659,9 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private static String pbActivity(EvidenceStore.Record record) {
-		if (!isPersonalBest(record)
-				|| record.metadata.details == null)
+		if (record == null || record.metadata == null || record.metadata.details == null)
+			return null;
+		if (!isPersonalBest(record) && !"diary".equals(record.metadata.eventType))
 			return null;
 		Object pb = record.metadata.details.get("record");
 		if (pb instanceof AnchorModels.PbRecord)

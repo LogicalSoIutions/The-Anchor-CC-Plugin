@@ -55,6 +55,9 @@ public class PersonalBestService
 	private static final Pattern NEW_PB_DURATION = Pattern.compile(
 		"^Duration:?\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)\\.?\\s*\\(new personal best\\)\\.?$",
 		Pattern.CASE_INSENSITIVE);
+	private static final Pattern COLOSSEUM_COMPLETION = Pattern.compile(
+		"^Wave 12 completed! Wave duration:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)(?:\\.|\\s|$)",
+		Pattern.CASE_INSENSITIVE);
 	private static final Pattern COX_COMPLETION = Pattern.compile(
 		"Team size:\\s*(?<team>[1-9][0-9]*|Solo)\\s*(?:players?)?\\s+Duration:\\s*(?<time>[0-9:]+(?:\\.[0-9]+)?)"
 			+ "(?:\\s+Personal best:\\s*[0-9:]+(?:\\.[0-9]+)?|\\s*\\(new personal best\\))"
@@ -158,6 +161,15 @@ public class PersonalBestService
 		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) return;
 		String rawMessage = event.getMessage().replaceAll("(?i)<br\\s*/?>", " ");
 		String message = Text.removeTags(rawMessage).replace('\u00A0', ' ').replaceAll("\\s+", " ").trim();
+		Double colosseumSeconds = colosseumCompletionDuration(message);
+		if (colosseumSeconds != null)
+		{
+			// Wave 12 prints the overall run time, and is itself completion
+			// evidence. Do not depend on the order of Sol's KC or PB updates.
+			captureObservedSoloActivity("Fortis Colosseum", colosseumSeconds);
+			pendingSpecialActivity = null;
+			return;
+		}
 		if (captureArchiveCompletion(message)) return;
 		Matcher doomCompletion = DOOM_COMPLETION_TITLE.matcher(message);
 		if (doomCompletion.matches())
@@ -316,7 +328,16 @@ public class PersonalBestService
 	static Double observedActivityDuration(String message)
 	{
 		if (message == null) return null;
+		// Intermediate Colosseum wave times are not completed activity results.
+		if (message.matches("(?i)^Wave [0-9]+ completed!.*")) return null;
 		Matcher matcher = OBSERVED_ACTIVITY_DURATION.matcher(message.trim());
+		return matcher.find() ? parseTime(matcher.group("time")) : null;
+	}
+
+	static Double colosseumCompletionDuration(String message)
+	{
+		if (message == null) return null;
+		Matcher matcher = COLOSSEUM_COMPLETION.matcher(message.trim());
 		return matcher.find() ? parseTime(matcher.group("time")) : null;
 	}
 

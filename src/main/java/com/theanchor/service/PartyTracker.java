@@ -396,7 +396,7 @@ public class PartyTracker
 	private void updateActiveRaid(String source, List<String> names)
 	{
 		List<String> cleaned = dedupe(names);
-		if (sameRaid(source, activeRaidSource) && !raidKey(source).equals("the fractured archive"))
+		if (sameRaid(source, activeRaidSource))
 		{
 			List<String> combined = new ArrayList<>(activeRaidNames);
 			combined.addAll(cleaned);
@@ -411,8 +411,12 @@ public class PartyTracker
 		// Named roster entries are the authoritative size. The CoX party-size
 		// varbit can briefly contain stale data while the instance is changing.
 		// Only use it later as a fallback when no names are available.
-		activeRaidPartySize = raidKey(source).equals("the fractured archive") ? raidCount(source, cleaned.size())
-			: Math.max(activeRaidPartySize, cleaned.size());
+		// Archive slots disappear as teammates leave the reward room. Retain
+		// their names, clan status, and the largest occupied-slot count until
+		// this raid ends so delayed chest collection keeps the full party.
+		int observedSize = raidKey(source).equals("the fractured archive")
+			? raidCount(source, cleaned.size()) : cleaned.size();
+		activeRaidPartySize = Math.max(activeRaidPartySize, observedSize);
 		if (source.equals(activeRaidSource) && cleaned.equals(activeRaidNames)) return;
 		activeRaidSource = source;
 		activeRaidNames = cleaned;
