@@ -4,7 +4,9 @@ RuneLite Plugin Hub project for The Anchor clan.
 
 ## Features
 
-- Home panel with member ranks, points, next-rank progress, and collapsible ROTM, BOTW, SOTW, and PvM Diary cards.
+- Reval-inspired clan panel with profile and ROTM/BOTW/SOTW competitions, leaderboards, PvM Diary, local submissions, and settings tabs.
+- PvM and Clan leaderboards backed by the website cache, with member search and personal standings.
+- PvM Diary categories and tier requirements open inside the sidebar with back navigation.
 - Event alerts delivered to game chat with an optional in-game overlay.
 - Evidence screenshots always include the player's RSN, even when chat is closed. Enable **Bingo Overlay → Screenshot only** to include active Bingo details only in captured evidence; leave it off to keep the normal in-game Bingo overlay.
 - Automatic full-client evidence capture for eligible loot, collection-log unlocks, pets, Combat Achievement tiers, and PBs.
@@ -40,3 +42,7 @@ The production API origin is `https://the-anchor.cc`. During development, enable
 The exact request and response shapes expected by the plugin are documented in [docs/api-contract.md](docs/api-contract.md).
 
 Evidence and caches are stored under `.runelite/the-anchor`. Authentication codes are stored only in RuneLite configuration and are never written into evidence metadata or logs.
+
+### UI attribution
+
+The sidebar visual components adapt the Reval Clan plugin by Lightroom, under the BSD 2-Clause license. See [LICENSES/reval-clan-LICENSE.txt](LICENSES/reval-clan-LICENSE.txt).

@@ -1,6 +1,7 @@
 /*
  * Portions of this panel are adapted from the PB Tracker Sync, Llama Club, and
- * Terpinheimer plugin panels. See LICENSES/pb-tracker-sync-LICENSE.txt,
+ * Terpinheimer plugin panels. Visual components also adapt Reval Clan; see
+ * LICENSES/reval-clan-LICENSE.txt. See LICENSES/pb-tracker-sync-LICENSE.txt,
  * LICENSES/llama-LICENSE.txt, and LICENSES/terpinheimer-LICENSE.txt.
  */
 package com.theanchor.ui;
@@ -55,7 +56,6 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
-import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
 import javax.swing.Scrollable;
 import javax.swing.JSpinner;
@@ -71,9 +71,8 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.util.AsyncBufferedImage;
 
 public class AnchorPanel extends PluginPanel {
-	private static final Color GOLD = new Color(207, 164, 76);
+	private static final Color GOLD = AnchorTheme.GOLD;
 	private static final Color TAB_BG = new Color(30, 33, 36);
-	private static final Color TAB_ACTIVE_BG = new Color(207, 164, 76);
 	private static final Color TAB_ACTIVE_FG = new Color(20, 20, 20);
 	private static final Color TAB_INACTIVE_FG = new Color(170, 170, 170);
 	private static final Color TAB_HOVER_BG = new Color(55, 60, 65);
@@ -81,10 +80,10 @@ public class AnchorPanel extends PluginPanel {
 	private static final Color DISCONNECTED_COLOR = new Color(158, 158, 158);
 	private static final Color BOTW_ACCENT = new Color(176, 70, 67);
 	private static final Color SOTW_ACCENT = new Color(55, 142, 157);
-	private static final Color PVM_ACCENT = new Color(79, 135, 201);
-	private static final Color CLAN_ACCENT = new Color(67, 164, 142);
+	private static final Color PVM_ACCENT = AnchorTheme.BLUE;
+	private static final Color CLAN_ACCENT = AnchorTheme.GREEN;
 	private static final Color SCORE_COLOR = new Color(238, 205, 124);
-	private static final int NAV_BUTTON_HEIGHT = 27;
+	private static final int NAV_BUTTON_HEIGHT = 28;
 	private static final Color[] RANK_COLORS = {
 			new Color(238, 193, 73), new Color(185, 195, 204), new Color(190, 126, 75)
 	};
@@ -106,19 +105,21 @@ public class AnchorPanel extends PluginPanel {
 	private final JLabel status = muted("");
 	private final JLabel connectionDot = new JLabel();
 	private final JPanel home = verticalPanel();
+	private final JPanel memberHeader = new JPanel(new BorderLayout(6, 0));
+	private String selectedDiaryCategory;
 	private final JPanel submissions = verticalPanel();
 	private final CardLayout contentCards = new CardLayout();
 	private final JPanel contentPanel = new JPanel(contentCards);
-	private JLabel homeTab;
-	private JLabel submissionsTab;
-	private final JPanel extraSettings = verticalPanel();
-	private JButton extraSettingsButton;
-	private boolean extraSettingsVisible;
+	private final JPanel competitionsPage = verticalPanel();
+	private final JPanel diaryPage = verticalPanel();
+	private JScrollPane diaryScroll;
+	private final LeaderboardPanel leaderboardsPage;
+	private final java.util.Map<String, JButton> navigationTabs = new java.util.LinkedHashMap<>();
+	private final JPanel settingsPage = verticalPanel();
 	private boolean rotmExpanded = true;
 	private boolean botwExpanded = true;
 	private boolean sotwExpanded = true;
-	private boolean pvmDiaryExpanded = true;
-	private String activeTab = "Home";
+	private String activeTab = "Profile";
 
 	private enum SubmissionFilter {
 		ALL("All", null), LOOT("Loot", "loot"), DIARY("Diary", "diary"), PBS("PBs", "personal_best"),
@@ -146,35 +147,36 @@ public class AnchorPanel extends PluginPanel {
 		this.configManager = configManager;
 		this.spriteManager = spriteManager;
 		this.itemManager = itemManager;
+		this.leaderboardsPage = new LeaderboardPanel(data);
 		setLayout(new BorderLayout());
-		setBackground(ColorScheme.DARK_GRAY_COLOR);
+		setBackground(AnchorTheme.BACKGROUND);
 		setBorder(null);
 
 		JPanel header = new JPanel(new GridBagLayout());
-		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		header.setBackground(AnchorTheme.BACKGROUND);
 		GridBagConstraints headerRow = new GridBagConstraints();
 		headerRow.gridx = 0;
 		headerRow.gridy = 0;
 		headerRow.weightx = 1.0;
 		headerRow.fill = GridBagConstraints.HORIZONTAL;
 		headerRow.anchor = GridBagConstraints.NORTHWEST;
-		banner.setAlignmentX(Component.CENTER_ALIGNMENT);
+		banner.setAlignmentX(Component.LEFT_ALIGNMENT);
 		refreshBanner();
 		header.add(banner, headerRow);
 
 		// Profile bar with connection status dot
-		JPanel profile = new JPanel(new BorderLayout(8, 0));
-		profile.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		profile.setBorder(BorderFactory.createCompoundBorder(
-				BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(67, 70, 73)),
-				BorderFactory.createEmptyBorder(8, 8, 8, 8)));
-		avatar.setPreferredSize(new Dimension(58, 58));
-		avatar.setIcon(new ImageIcon(scale(placeholderAvatar(), 58, 58)));
+		JPanel profile = memberHeader;
+		profile.setOpaque(false);
+		profile.setAlignmentX(Component.LEFT_ALIGNMENT);
+		profile.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+		avatar.setPreferredSize(new Dimension(32, 32));
+		avatar.setIcon(new ImageIcon(scale(placeholderAvatar(), 32, 32)));
 		profile.add(avatar, BorderLayout.WEST);
 
 		JPanel text = verticalPanel();
+		text.setOpaque(false);
 		identity.setForeground(Color.WHITE);
-		identity.setFont(identity.getFont().deriveFont(Font.BOLD));
+		identity.setFont(AnchorTheme.font(Font.BOLD, 13f));
 		text.add(identity);
 		text.add(status);
 		profile.add(text, BorderLayout.CENTER);
@@ -185,14 +187,11 @@ public class AnchorPanel extends PluginPanel {
 		connectionDot.setVerticalAlignment(SwingConstants.CENTER);
 		profile.add(connectionDot, BorderLayout.EAST);
 
-		headerRow.gridy++;
-		header.add(profile, headerRow);
 
-		// Navigation: two tabs on the first row, one full-width settings row beneath
-		// them.
+		// Compact navigation keeps each clan feature within easy reach.
 		JPanel navigation = fullWidthVerticalPanel();
 		navigation.setLayout(new GridBagLayout());
-		navigation.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		navigation.setBackground(AnchorTheme.BACKGROUND);
 		navigation.setAlignmentX(Component.LEFT_ALIGNMENT);
 		GridBagConstraints navigationRow = new GridBagConstraints();
 		navigationRow.gridx = 0;
@@ -201,16 +200,20 @@ public class AnchorPanel extends PluginPanel {
 		navigationRow.fill = GridBagConstraints.HORIZONTAL;
 		navigationRow.anchor = GridBagConstraints.NORTHWEST;
 		navigation.add(buildTabBar(), navigationRow);
-		navigationRow.gridy++;
-		navigation.add(buildExtraSettings(), navigationRow);
+
 		headerRow.gridy++;
 		header.add(navigation, headerRow);
 
 		// Content area with CardLayout
-		contentPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		contentPanel.add(scroll(home, true), "Home");
+		contentPanel.setBackground(AnchorTheme.BACKGROUND);
+		contentPanel.add(scroll(home, true), "Profile");
+		diaryScroll = scroll(diaryPage, true);
+		contentPanel.add(diaryScroll, "PvM Diary");
+		contentPanel.add(scroll(leaderboardsPage, true), "Leaderboards");
 		contentPanel.add(scroll(submissions, true), "Submissions");
-		contentCards.show(contentPanel, "Home");
+		buildSettingsPage();
+		contentPanel.add(scroll(settingsPage, true), "Settings");
+		contentCards.show(contentPanel, activeTab);
 
 		add(header, BorderLayout.NORTH);
 		add(contentPanel, BorderLayout.CENTER);
@@ -219,37 +222,22 @@ public class AnchorPanel extends PluginPanel {
 		refresh();
 	}
 
-	private JPanel buildExtraSettings() {
-		JPanel container = fullWidthVerticalPanel();
-		container.setAlignmentX(Component.LEFT_ALIGNMENT);
-		container.setBorder(BorderFactory.createEmptyBorder(8, 8, 6, 8));
-		extraSettingsButton = actionButton("Extra Settings", false);
-		extraSettingsButton.setAlignmentX(Component.LEFT_ALIGNMENT);
-		extraSettingsButton.setMinimumSize(new Dimension(0, NAV_BUTTON_HEIGHT));
-		extraSettingsButton.setPreferredSize(new Dimension(0, NAV_BUTTON_HEIGHT));
-		extraSettingsButton
-				.setMaximumSize(new Dimension(Integer.MAX_VALUE, extraSettingsButton.getPreferredSize().height));
-		extraSettingsButton.addActionListener(e -> toggleExtraSettings());
-		container.add(extraSettingsButton);
+	private void buildSettingsPage() {
+		settingsPage.add(pageHeading("SETTINGS", ""));
+		JPanel actions = card();
+		actions.add(label("Profile & uploads", true));
+		actions.add(Box.createVerticalStrut(8));
+		for (JButton button : new JButton[]{
+				configActionButton("Refresh Profile", "refreshProfile", true),
+				configActionButton("Retry Uploads", "retryOutbox", false),
+				configActionButton("Clear Image Cache", "clearImageCache", false)}) {
+			button.setAlignmentX(Component.LEFT_ALIGNMENT);
+			button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+			actions.add(button);
+			actions.add(Box.createVerticalStrut(6));
+		}
+		settingsPage.add(actions);
 
-		extraSettings.setAlignmentX(Component.LEFT_ALIGNMENT);
-		extraSettings.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
-		extraSettings.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
-		extraSettings.setVisible(false);
-		extraSettings.add(sectionHeading("ACTIONS"));
-		extraSettings.add(Box.createVerticalStrut(4));
-		JPanel actions = new JPanel(new GridLayout(0, 2, 6, 4));
-		actions.setOpaque(false);
-		actions.setAlignmentX(Component.LEFT_ALIGNMENT);
-		actions.add(configActionButton("Refresh profile", "refreshProfile", true));
-		actions.add(configActionButton("Retry uploads", "retryOutbox", true));
-		JButton clearCache = configActionButton("Clear image cache", "clearImageCache", false);
-		actions.add(clearCache);
-		actions.add(Box.createGlue());
-		actions.setMaximumSize(new Dimension(Integer.MAX_VALUE, actions.getPreferredSize().height));
-		extraSettings.add(actions);
-		container.add(extraSettings);
-		return container;
 	}
 
 	private JButton configActionButton(String text, String key, boolean primary) {
@@ -263,122 +251,48 @@ public class AnchorPanel extends PluginPanel {
 		return button;
 	}
 
-	private void toggleExtraSettings() {
-		extraSettingsVisible = !extraSettingsVisible;
-		extraSettings.setVisible(extraSettingsVisible);
-		extraSettingsButton.setText(extraSettingsVisible ? "Hide Extra Settings" : "Extra Settings");
-		revalidate();
-		repaint();
-	}
 
 	private JPanel buildTabBar() {
-		JPanel bar = new JPanel(new GridLayout(1, 2, 2, 0)) {
-			@Override
-			protected void paintComponent(Graphics g) {
-				Graphics2D g2 = (Graphics2D) g.create();
-				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-				g2.setColor(TAB_BG);
-				g2.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
-				g2.dispose();
-			}
-		};
+		JPanel bar = new JPanel(new GridBagLayout());
 		bar.setOpaque(false);
-		bar.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
-		int tabBarHeight = NAV_BUTTON_HEIGHT + 12;
-		bar.setMinimumSize(new Dimension(0, tabBarHeight));
-		bar.setPreferredSize(new Dimension(0, tabBarHeight));
-		bar.setMaximumSize(new Dimension(Integer.MAX_VALUE, tabBarHeight));
-
-		homeTab = createTabLabel("Home", true);
-		submissionsTab = createTabLabel("Submissions", false);
-
-		homeTab.addMouseListener(new MouseAdapter() {
-			@Override
-			public void mouseClicked(MouseEvent e) {
-				switchTab("Home");
-			}
-
-			@Override
-			public void mouseEntered(MouseEvent e) {
-				if (!activeTab.equals("Home"))
-					homeTab.setBackground(TAB_HOVER_BG);
-				homeTab.repaint();
-			}
-
-			@Override
-			public void mouseExited(MouseEvent e) {
-				if (!activeTab.equals("Home"))
-					homeTab.setBackground(TAB_BG);
-				homeTab.repaint();
-			}
-		});
-		submissionsTab.addMouseListener(new MouseAdapter() {
-			@Override
-			public void mouseClicked(MouseEvent e) {
-				switchTab("Submissions");
-			}
-
-			@Override
-			public void mouseEntered(MouseEvent e) {
-				if (!activeTab.equals("Submissions"))
-					submissionsTab.setBackground(TAB_HOVER_BG);
-				submissionsTab.repaint();
-			}
-
-			@Override
-			public void mouseExited(MouseEvent e) {
-				if (!activeTab.equals("Submissions"))
-					submissionsTab.setBackground(TAB_BG);
-				submissionsTab.repaint();
-			}
-		});
-
-		bar.add(homeTab);
-		bar.add(submissionsTab);
+		bar.setBorder(BorderFactory.createEmptyBorder(8, 8, 2, 8));
+		String[] tabs = {"Profile", "Leaderboards", "PvM Diary", "Submissions", "Settings"};
+		for (int i = 0; i < tabs.length; i++) {
+			String name = tabs[i];
+			JButton tab = actionButton(name, false);
+			tab.setPreferredSize(new Dimension(0, 28));
+			tab.putClientProperty("navigation", Boolean.TRUE);
+			tab.addActionListener(e -> switchTab(name));
+			navigationTabs.put(name, tab);
+			GridBagConstraints cell = new GridBagConstraints();
+			cell.gridx = i % 2;
+			cell.gridy = i / 2;
+			cell.gridwidth = i == tabs.length - 1 ? 2 : 1;
+			cell.weightx = cell.gridwidth;
+			cell.fill = GridBagConstraints.HORIZONTAL;
+			cell.insets = new Insets(i < 2 ? 0 : 4, 0, 0, i % 2 == 0 && cell.gridwidth == 1 ? 4 : 0);
+			bar.add(tab, cell);
+		}
+		updateNavigation();
 		return bar;
 	}
 
-	private static JLabel createTabLabel(String text, boolean active) {
-		JLabel label = new JLabel(text, SwingConstants.CENTER) {
-			@Override
-			protected void paintComponent(Graphics g) {
-				Graphics2D g2 = (Graphics2D) g.create();
-				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-				g2.setColor(getBackground());
-				g2.fillRoundRect(0, 0, getWidth(), getHeight(), 8, 8);
-				g2.dispose();
-				super.paintComponent(g);
-			}
-		};
-		label.setOpaque(false);
-		label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
-		label.setMinimumSize(new Dimension(0, NAV_BUTTON_HEIGHT));
-		label.setPreferredSize(new Dimension(0, NAV_BUTTON_HEIGHT));
-		label.setMaximumSize(new Dimension(Integer.MAX_VALUE, NAV_BUTTON_HEIGHT));
-		label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		if (active) {
-			label.setBackground(TAB_ACTIVE_BG);
-			label.setForeground(TAB_ACTIVE_FG);
-		} else {
-			label.setBackground(TAB_BG);
-			label.setForeground(TAB_INACTIVE_FG);
-		}
-		return label;
+	private void updateNavigation() {
+		navigationTabs.forEach((name, tab) -> {
+			boolean selected = name.equals(activeTab);
+			tab.setBackground(selected ? AnchorTheme.BLUE : AnchorTheme.SURFACE);
+			tab.setForeground(selected ? Color.WHITE : AnchorTheme.MUTED);
+			tab.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 2));
+			tab.setBorderPainted(false);
+			tab.setSelected(selected);
+		});
 	}
 
 	private void switchTab(String tabName) {
-		if (activeTab.equals(tabName))
-			return;
 		activeTab = tabName;
-
-		homeTab.setBackground(tabName.equals("Home") ? TAB_ACTIVE_BG : TAB_BG);
-		homeTab.setForeground(tabName.equals("Home") ? TAB_ACTIVE_FG : TAB_INACTIVE_FG);
-		submissionsTab.setBackground(tabName.equals("Submissions") ? TAB_ACTIVE_BG : TAB_BG);
-		submissionsTab.setForeground(tabName.equals("Submissions") ? TAB_ACTIVE_FG : TAB_INACTIVE_FG);
-
-		homeTab.repaint();
-		submissionsTab.repaint();
+		updateNavigation();
 		contentCards.show(contentPanel, tabName);
+		if ("Leaderboards".equals(tabName) && data.leaderboards() == null) data.refreshLeaderboards();
 	}
 
 	private void refreshOnEdt() {
@@ -407,8 +321,8 @@ public class AnchorPanel extends PluginPanel {
 		AnchorModels.Profile profile = data.profile();
 		if (profile == null || profile.member == null) {
 			identity.setText("The Anchor");
-			status.setText(html(data.message()));
-			avatar.setIcon(new ImageIcon(scale(placeholderAvatar(), 58, 58)));
+			status.setText(data.message());
+			avatar.setIcon(new ImageIcon(scale(placeholderAvatar(), 32, 32)));
 		} else {
 			String rank = profile.standings == null ? "—" : value(profile.standings.currentRank);
 			identity.setText(html("<b>" + esc(profile.member.name) + "</b><br><span style='color:#eecd7c'>"
@@ -417,13 +331,15 @@ public class AnchorPanel extends PluginPanel {
 			if (profile.member.status != null && !profile.member.status.isBlank()) {
 				memberStatus += " · " + profile.member.status;
 			}
-			status.setText(html("<span style='color:#9da1a4'>" + esc(memberStatus) + "</span>"));
+			status.setText(memberStatus);
 			avatar.setIcon(new ImageIcon(
-					scale(data.profileImage() == null ? placeholderAvatar() : data.profileImage(), 58, 58)));
+					scale(data.profileImage() == null ? placeholderAvatar() : data.profileImage(), 32, 32)));
 		}
 		updateConnectionDot();
 		rebuildHome();
 		rebuildSubmissions();
+		leaderboardsPage.refresh();
+		AnchorTheme.typography(this);
 		revalidate();
 		repaint();
 	}
@@ -466,144 +382,224 @@ public class AnchorPanel extends PluginPanel {
 
 	private void rebuildHome() {
 		home.removeAll();
+		competitionsPage.removeAll();
+		diaryPage.removeAll();
+		home.add(Box.createVerticalStrut(4));
+		competitionsPage.add(pageHeading("Competitions", ""));
+
 		AnchorModels.Profile profile = data.profile();
 		if (profile != null && profile.standings != null) {
 			AnchorModels.Standings s = profile.standings;
-			JPanel ranks = card();
-			ranks.add(sectionHeading("CLAN PROFILE"));
-			ranks.add(Box.createVerticalStrut(5));
-			ranks.add(statRow("PVM RANK", rank(s.pvmRank), PVM_ACCENT,
-					"CLAN RANK", rank(s.clanRank), CLAN_ACCENT));
-			ranks.add(Box.createVerticalStrut(4));
-			ranks.add(statRow("PVM POINTS", number(s.pvmPoints), PVM_ACCENT,
-					"CLAN POINTS", number(s.clanPoints), CLAN_ACCENT));
-			if (s.nextRank != null) {
-				ranks.add(Box.createVerticalStrut(7));
-				ranks.add(nextRank(value(s.nextRank.name)));
-				ranks.add(Box.createVerticalStrut(4));
-				ranks.add(progress("PvM", s.pvmPoints, s.nextRank.pvmPointsRemaining, PVM_ACCENT));
-				ranks.add(Box.createVerticalStrut(3));
-				ranks.add(progress("Clan", s.clanPoints, s.nextRank.clanPointsRemaining, CLAN_ACCENT));
-			} else
-				ranks.add(muted("Administrative or highest rank"));
-			home.add(ranks);
+			JPanel profileCard = card();
+			profileCard.add(memberHeader);
+			home.add(profileCard);
 			home.add(Box.createVerticalStrut(8));
+			JPanel points = new JPanel(new GridLayout(1, 2, 4, 0));
+			points.setOpaque(false);
+			points.setAlignmentX(Component.LEFT_ALIGNMENT);
+			points.setMaximumSize(new Dimension(Integer.MAX_VALUE, 72));
+			points.add(pointSummary("PvM Points", s.pvmPoints, s.pvmRank, GOLD));
+			points.add(pointSummary("Clan Points", s.clanPoints, s.clanRank, CLAN_ACCENT));
+			home.add(points);
+			home.add(Box.createVerticalStrut(6));
+			if (s.nextRank != null) {
+				JPanel rankProgress = card();
+				rankProgress.add(muted("NEXT RANK"));
+				JLabel target = label(value(s.nextRank.name), true);
+				target.setForeground(GOLD);
+				rankProgress.add(target);
+				rankProgress.add(Box.createVerticalStrut(10));
+				rankProgress.add(progress("PvM", s.pvmPoints, s.nextRank.pvmPointsRemaining, PVM_ACCENT));
+				rankProgress.add(Box.createVerticalStrut(10));
+				rankProgress.add(progress("Clan", s.clanPoints, s.nextRank.clanPointsRemaining, CLAN_ACCENT));
+				rankProgress.add(Box.createVerticalStrut(8));
+				String remaining = s.nextRank.pvmPointsRemaining == 0 && s.nextRank.clanPointsRemaining == 0
+						? "Point requirements met"
+						: number(s.nextRank.pvmPointsRemaining) + " PvM · " + number(s.nextRank.clanPointsRemaining) + " Clan to go";
+				rankProgress.add(muted(remaining));
+				if (s.nextRank.additionalRequirement != null && !s.nextRank.additionalRequirement.isBlank()) {
+					rankProgress.add(Box.createVerticalStrut(8));
+					rankProgress.add(wrappedMuted(s.nextRank.additionalRequirement));
+				}
+				home.add(rankProgress);
+				home.add(Box.createVerticalStrut(6));
+			}
 		}
+		if (profile == null || profile.standings == null) {
+			JPanel empty = card();
+			empty.add(wrappedMuted(data.message()));
+			home.add(empty);
+		}
+		JPanel diaryOverview = card();
+		diaryOverview.add(label("PvM Diary", true));
+		diaryOverview.add(Box.createVerticalStrut(6));
+		AnchorModels.PvmDiaryStatus diary = data.pvmDiaryStatus();
+		if (diary != null) diaryOverview.add(diarySummary(diary));
+		else diaryOverview.add(wrappedMuted(profile == null ? "Log in to view your diary progress" : "Diary progress is currently unavailable"));
+		diaryOverview.add(Box.createVerticalStrut(10));
+		JButton openDiary = actionButton("View Diary", false);
+		openDiary.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+		openDiary.setAlignmentX(Component.LEFT_ALIGNMENT);
+		openDiary.addActionListener(e -> switchTab("PvM Diary"));
+		diaryOverview.add(openDiary);
+		home.add(diaryOverview);
 		AnchorModels.CompetitionPanels competitions = data.competitionPanels();
 		AnchorModels.Standings standings = profile == null ? null : profile.standings;
 		String playerName = profile == null || profile.member == null ? null : profile.member.name;
-		home.add(competition("ROTM", competitions == null ? null : competitions.rotm, null,
+		competitionsPage.add(competition("ROTM", competitions == null ? null : competitions.rotm, null,
 				standings == null ? null : standings.rotmRank, playerName, rotmExpanded));
-		home.add(Box.createVerticalStrut(8));
+		competitionsPage.add(Box.createVerticalStrut(8));
 		String weeklyTiming = sharedCompetitionTiming(competitions);
 		if (!weeklyTiming.isEmpty()) {
-			home.add(weeklyTimer(weeklyTiming));
-			home.add(Box.createVerticalStrut(8));
+			competitionsPage.add(weeklyTimer(weeklyTiming));
+			competitionsPage.add(Box.createVerticalStrut(8));
 		}
 		boolean authRequired = requiresCompetitionAuthentication(data.connection());
-		home.add(competition("BOTW", competitions == null ? null : competitions.botw,
+		competitionsPage.add(competition("BOTW", competitions == null ? null : competitions.botw,
 				authRequired ? data.unauthenticatedBotwImage() : data.botwImage(),
 				standings == null ? null : standings.botwRank, playerName, botwExpanded));
-		home.add(Box.createVerticalStrut(8));
-		home.add(competition("SOTW", competitions == null ? null : competitions.sotw,
+		competitionsPage.add(Box.createVerticalStrut(8));
+		competitionsPage.add(competition("SOTW", competitions == null ? null : competitions.sotw,
 				authRequired ? data.unauthenticatedSotwImage() : data.sotwImage(),
 				standings == null ? null : standings.sotwRank, playerName, sotwExpanded));
-		home.add(Box.createVerticalStrut(8));
-		home.add(pvmDiary(data.pvmDiaryStatus(), pvmDiaryExpanded));
+		competitionsPage.add(Box.createVerticalStrut(8));
+		home.add(Box.createVerticalStrut(6));
+		home.add(competitionsPage);
+		rebuildDiaryPage();
+		competitionsPage.revalidate();
+		competitionsPage.repaint();
+		diaryPage.revalidate();
+		diaryPage.repaint();
 	}
 
-	private JPanel pvmDiary(AnchorModels.PvmDiaryStatus diary, boolean expanded) {
-		JPanel card = card();
-		JButton toggle = actionButton((expanded ? "▾ " : "▸ ") + "PVM DIARY PROGRESS", false);
-		toggle.setHorizontalAlignment(SwingConstants.LEFT);
-		toggle.setToolTipText(expanded ? "Collapse PvM Diary progress" : "Expand PvM Diary progress");
-		toggle.addActionListener(e -> { pvmDiaryExpanded = !pvmDiaryExpanded; rebuildHome(); home.revalidate(); home.repaint(); });
-		toggle.setAlignmentX(Component.LEFT_ALIGNMENT);
-		toggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, NAV_BUTTON_HEIGHT));
-		card.add(toggle);
-		if (!expanded) return card;
+	private JPanel pvmDiary(AnchorModels.PvmDiaryStatus diary) {
+		JPanel page = fullWidthVerticalPanel();
 		if (diary == null) {
-			card.add(Box.createVerticalStrut(5));
-			card.add(muted("Diary progress is currently unavailable"));
-			return card;
+			JPanel empty = card();
+			empty.add(wrappedMuted("Diary progress is currently unavailable"));
+			page.add(empty);
+			return page;
 		}
-		card.add(Box.createVerticalStrut(6));
-		card.add(diarySummary(diary));
-		card.add(Box.createVerticalStrut(4));
-		card.add(progress("Diary", diary.earnedPoints, Math.max(0, diary.totalPoints - diary.earnedPoints), PVM_ACCENT, false));
+		JPanel summary = card();
+		summary.add(label("Progress", true));
+		summary.add(Box.createVerticalStrut(12));
+		summary.add(diarySummary(diary));
+		summary.add(Box.createVerticalStrut(12));
+		summary.add(AnchorTheme.bar(diary.earnedPoints, diary.totalPoints, PVM_ACCENT));
 		if (diary.delivery != null && (diary.delivery.outstandingAwards > 0 || diary.delivery.reconciliationRequired)) {
-			card.add(Box.createVerticalStrut(4));
-			String message = diary.delivery.reconciliationRequired ? "Points delivery needs reconciliation"
-					: number(diary.delivery.outstandingAwards) + " points awaiting delivery";
-			card.add(muted(message));
+			summary.add(Box.createVerticalStrut(10));
+			summary.add(wrappedMuted(diary.delivery.reconciliationRequired ? "Points delivery needs reconciliation"
+					: number(diary.delivery.outstandingAwards) + " points awaiting delivery"));
 		}
-		if (diary.categories != null && !diary.categories.isEmpty()) {
-			card.add(Box.createVerticalStrut(7));
-			card.add(centeredDiaryHeading("CATEGORIES"));
-			for (AnchorModels.PvmDiaryCategory category : diary.categories) {
-				card.add(Box.createVerticalStrut(3));
-				card.add(diaryCategoryRow(category));
-			}
+		page.add(summary);
+		page.add(Box.createVerticalStrut(18));
+		page.add(label("Activities", true));
+		page.add(Box.createVerticalStrut(8));
+		if (diary.categories != null) for (AnchorModels.PvmDiaryCategory category : diary.categories) {
+			page.add(diaryCategoryRow(category));
+			page.add(Box.createVerticalStrut(6));
 		}
-		return card;
+		return page;
 	}
 
 	private static JPanel diarySummary(AnchorModels.PvmDiaryStatus diary) {
 		JPanel summary = new JPanel(new GridLayout(1, 2, 8, 0));
 		summary.setOpaque(false);
 		summary.setAlignmentX(Component.LEFT_ALIGNMENT);
-		summary.setMaximumSize(new Dimension(PANEL_WIDTH, 34));
-		summary.add(diaryMetric("PVM EARNED", number(diary.earnedPoints) + " / " + number(diary.totalPoints), PVM_ACCENT));
-		summary.add(diaryMetric("TIERS", diary.completedTiers + " / " + diary.totalTiers, SOTW_ACCENT));
+		summary.setMaximumSize(new Dimension(PANEL_WIDTH, 42));
+		summary.add(diaryMetric("PvM Points", number(diary.earnedPoints), PVM_ACCENT));
+		summary.add(diaryMetric("Tiers", diary.completedTiers + " / " + diary.totalTiers, CLAN_ACCENT));
 		return summary;
 	}
 
 	private static JPanel diaryMetric(String title, String amount, Color color) {
 		JPanel metric = new JPanel(new GridLayout(2, 1));
 		metric.setOpaque(false);
-		JLabel label = new JLabel(title, SwingConstants.CENTER);
+		JLabel label = new JLabel(title, SwingConstants.LEFT);
 		label.setForeground(new Color(145, 148, 151));
-		label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
-		JLabel value = new JLabel(amount, SwingConstants.CENTER);
+		label.setFont(AnchorTheme.font(Font.PLAIN, 11f));
+		JLabel value = new JLabel(amount, SwingConstants.LEFT);
 		value.setForeground(color);
-		value.setFont(value.getFont().deriveFont(Font.BOLD, 14f));
+		value.setFont(AnchorTheme.font(Font.BOLD, 19f));
 		metric.add(label);
 		metric.add(value);
 		return metric;
 	}
 
-	private static JLabel centeredDiaryHeading(String text) {
-		JLabel heading = competitionSectionHeading(text, SCORE_COLOR);
-		heading.setHorizontalAlignment(SwingConstants.CENTER);
-		heading.setMaximumSize(new Dimension(PANEL_WIDTH, heading.getPreferredSize().height));
-		return heading;
+	private JPanel diaryCategoryRow(AnchorModels.PvmDiaryCategory category) {
+		JPanel row = AnchorTheme.surface(PVM_ACCENT);
+		row.setBorder(BorderFactory.createEmptyBorder(14, 14, 14, 14));
+		JPanel titleRow = new JPanel(new BorderLayout());
+		titleRow.setOpaque(false);
+		titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		JLabel name = new JLabel(diaryDisplayName(compactDiaryCategoryName(value(category.name))));
+		name.setFont(AnchorTheme.font(Font.BOLD, 13));
+		name.setForeground(AnchorTheme.TEXT);
+		titleRow.add(name, BorderLayout.CENTER);
+		JLabel arrow = new JLabel(category.completedTiers + "/" + category.totalTiers);
+		arrow.setForeground(GOLD);
+		arrow.setFont(AnchorTheme.font(Font.BOLD, 16));
+		titleRow.add(arrow, BorderLayout.EAST);
+		row.add(titleRow);
+		row.add(Box.createVerticalStrut(5));
+		JPanel detail = new JPanel(new BorderLayout());
+		detail.setOpaque(false);
+		detail.setAlignmentX(Component.LEFT_ALIGNMENT);
+		JLabel tiers = muted("tiers completed");
+		JLabel points = muted(number(category.earnedPoints) + " / " + number(category.totalPoints) + " pts");
+		points.setForeground(PVM_ACCENT);
+		detail.add(tiers, BorderLayout.WEST);
+		detail.add(points, BorderLayout.EAST);
+		row.add(detail);
+		row.add(Box.createVerticalStrut(9));
+		row.add(AnchorTheme.bar(category.earnedPoints, category.totalPoints, GOLD));
+		row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		MouseAdapter click = new MouseAdapter() {
+			@Override public void mouseClicked(MouseEvent e) { showDiaryCategoryDetails(category); }
+		};
+		installClick(row, click);
+		row.addMouseListener(new MouseAdapter() {
+			@Override public void mouseEntered(MouseEvent e) { row.putClientProperty("hover", Boolean.TRUE); row.repaint(); }
+			@Override public void mouseExited(MouseEvent e) {
+				if (!row.contains(SwingUtilities.convertPoint(e.getComponent(), e.getPoint(), row))) {
+					row.putClientProperty("hover", Boolean.FALSE); row.repaint();
+				}
+			}
+		});
+		row.setFocusable(true);
+		row.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("ENTER"), "details");
+		row.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("SPACE"), "details");
+		row.getActionMap().put("details", new javax.swing.AbstractAction() {
+			@Override public void actionPerformed(java.awt.event.ActionEvent e) { showDiaryCategoryDetails(category); }
+		});
+		row.getAccessibleContext().setAccessibleName(value(category.name) + ", " + category.completedTiers + " of " + category.totalTiers + " tiers. Open details.");
+		return row;
 	}
 
-	private JPanel diaryCategoryRow(AnchorModels.PvmDiaryCategory category) {
-		JPanel row = new JPanel(new GridLayout(1, 3, 4, 0));
-		row.setOpaque(false);
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(PANEL_WIDTH, 20));
-		String categoryName = value(category.name);
-		JLabel categoryLabel = diaryCategoryLabel(compactDiaryCategoryName(categoryName), Color.WHITE);
-		categoryLabel.setToolTipText(categoryName);
-		row.add(categoryLabel);
-		JButton tiers = actionButton(category.completedTiers + " / " + category.totalTiers + " tiers", false);
-		tiers.setForeground(SOTW_ACCENT);
-		tiers.setToolTipText("View " + value(category.name) + " tier details");
-		tiers.setPreferredSize(new Dimension(0, 20));
-		tiers.setMargin(new Insets(0, 2, 0, 2));
-		tiers.addActionListener(e -> showDiaryCategoryDetails(category));
-		row.add(tiers);
-		row.add(diaryCategoryLabel(number(category.earnedPoints) + " / " + number(category.totalPoints), PVM_ACCENT));
-		return row;
+	private static void installClick(Component component, MouseAdapter listener) {
+		component.addMouseListener(listener);
+		if (component instanceof java.awt.Container)
+			for (Component child : ((java.awt.Container) component).getComponents()) installClick(child, listener);
 	}
 
 	private static JLabel diaryCategoryLabel(String text, Color color) {
 		JLabel label = new JLabel(text, SwingConstants.CENTER);
 		label.setForeground(color);
-		label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
+		label.setFont(AnchorTheme.font(Font.BOLD, 11f));
 		return label;
+	}
+
+	private static String diaryDisplayName(String raw) {
+		if (raw == null || raw.isBlank()) return "—";
+		String[] words = raw.replace('_', ' ').trim().split("\\s+");
+		java.util.Set<String> abbreviations = java.util.Set.of("cox", "tob", "toa", "cm", "hmt", "cg", "pvm");
+		for (int i = 0; i < words.length; i++) {
+			String lower = words[i].toLowerCase(Locale.ROOT);
+			if (abbreviations.contains(lower)) words[i] = lower.toUpperCase(Locale.ROOT);
+			else if (lower.matches("[0-9]+s")) words[i] = lower;
+			else words[i] = Character.toUpperCase(words[i].charAt(0)) + words[i].substring(1);
+		}
+		return String.join(" ", words);
 	}
 
 	private static String compactDiaryCategoryName(String name) {
@@ -611,92 +607,91 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private void showDiaryCategoryDetails(AnchorModels.PvmDiaryCategory category) {
+		selectedDiaryCategory = category.name;
+		rebuildDiaryPage();
+		SwingUtilities.invokeLater(() -> diaryScroll.getVerticalScrollBar().setValue(0));
+	}
+
+	private void rebuildDiaryPage() {
+		diaryPage.removeAll();
 		AnchorModels.PvmDiaryStatus diary = data.pvmDiaryStatus();
-		if (diary == null || diary.activities == null) return;
-		Window owner = SwingUtilities.getWindowAncestor(this);
-		// Keep the diary visible while allowing the player to return to the game.
-		JDialog dialog = new JDialog(owner, value(category.name) + " PvM Diary", Dialog.ModalityType.MODELESS);
-		dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-		dialog.setLayout(new BorderLayout());
-		dialog.getContentPane().setBackground(ColorScheme.DARK_GRAY_COLOR);
-
-		JPanel header = new JPanel(new BorderLayout(8, 0));
-		header.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		header.setBorder(BorderFactory.createEmptyBorder(10, 12, 8, 12));
-		JLabel title = new JLabel(value(category.name).toUpperCase(Locale.ROOT) + " · PVM DIARY");
-		title.setForeground(SCORE_COLOR);
-		title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
-		JLabel total = new JLabel(category.completedTiers + " / " + category.totalTiers + " tiers · "
-				+ number(category.earnedPoints) + " / " + number(category.totalPoints) + " points", SwingConstants.RIGHT);
-		total.setForeground(new Color(190, 193, 196));
-		header.add(title, BorderLayout.WEST);
-		header.add(total, BorderLayout.EAST);
-		dialog.add(header, BorderLayout.NORTH);
-
-		JPanel details = verticalPanel();
-		details.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-		boolean found = false;
-		for (AnchorModels.PvmDiaryActivity activity : diary.activities) {
-			if (!value(category.name).equals(activity.category)) continue;
-			if (found) details.add(Box.createVerticalStrut(6));
-			details.add(diaryActivityDetails(activity));
-			found = true;
+		AnchorModels.PvmDiaryCategory selected = null;
+		if (diary != null && diary.categories != null) for (AnchorModels.PvmDiaryCategory category : diary.categories)
+			if (java.util.Objects.equals(selectedDiaryCategory, category.name)) { selected = category; break; }
+		if (selected == null) {
+			selectedDiaryCategory = null;
+			diaryPage.add(pageHeading("PVM DIARY", ""));
+			diaryPage.add(pvmDiary(diary));
+		} else {
+			JButton back = actionButton("‹  All activities", false);
+			back.setAlignmentX(Component.LEFT_ALIGNMENT);
+			back.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+			back.addActionListener(e -> {
+				selectedDiaryCategory = null;
+				rebuildDiaryPage();
+				SwingUtilities.invokeLater(() -> diaryScroll.getVerticalScrollBar().setValue(0));
+			});
+			diaryPage.add(Box.createVerticalStrut(6));
+			diaryPage.add(back);
+			diaryPage.add(pageHeading(diaryDisplayName(value(selected.name)), ""));
+			JPanel summary = card();
+			summary.add(label(selected.completedTiers + " / " + selected.totalTiers + " tiers completed", true));
+			summary.add(Box.createVerticalStrut(4));
+			summary.add(muted(number(selected.earnedPoints) + " / " + number(selected.totalPoints) + " PvM points"));
+			summary.add(Box.createVerticalStrut(8));
+			summary.add(AnchorTheme.bar(selected.earnedPoints, selected.totalPoints, GOLD));
+			diaryPage.add(summary);
+			diaryPage.add(Box.createVerticalStrut(8));
+			boolean found = false;
+			if (diary.activities != null) for (AnchorModels.PvmDiaryActivity activity : diary.activities) {
+				if (!java.util.Objects.equals(selected.name, activity.category)) continue;
+				diaryPage.add(diaryActivityDetails(activity));
+				diaryPage.add(Box.createVerticalStrut(6));
+				found = true;
+			}
+			if (!found) diaryPage.add(wrappedMuted("No activity details are available yet."));
 		}
-		if (!found) details.add(muted("No activity details are available yet."));
-		JScrollPane detailsScroll = scroll(details);
-		int detailsHeight = Math.min(420, Math.max(110, details.getPreferredSize().height + 8));
-		detailsScroll.setPreferredSize(new Dimension(460, detailsHeight));
-		dialog.add(detailsScroll, BorderLayout.CENTER);
-
-		JPanel footer = new JPanel(new BorderLayout());
-		footer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		footer.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
-		JButton close = actionButton("Close", false);
-		close.addActionListener(e -> dialog.dispose());
-		footer.add(close, BorderLayout.EAST);
-		dialog.add(footer, BorderLayout.SOUTH);
-		dialog.setMinimumSize(new Dimension(400, 180));
-		dialog.pack();
-		dialog.setLocationRelativeTo(this);
-		dialog.setVisible(true);
+		AnchorTheme.typography(diaryPage);
+		diaryPage.revalidate();
+		diaryPage.repaint();
 	}
 
 	private static JPanel diaryActivityDetails(AnchorModels.PvmDiaryActivity activity) {
 		JPanel card = card();
-		JPanel heading = new JPanel(new BorderLayout(8, 0));
-		heading.setOpaque(false);
-		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
-		JLabel name = new JLabel(value(activity.name));
-		name.setForeground(Color.WHITE);
-		name.setFont(name.getFont().deriveFont(Font.BOLD, 13f));
-		JLabel score = new JLabel(number(activity.earnedPoints) + " points", SwingConstants.RIGHT);
-		score.setForeground(PVM_ACCENT);
-		score.setFont(score.getFont().deriveFont(Font.BOLD, 12f));
-		heading.add(name, BorderLayout.CENTER);
-		heading.add(score, BorderLayout.EAST);
-		card.add(heading);
-		card.add(Box.createVerticalStrut(3));
+		JLabel name = wrappedMuted(diaryDisplayName(value(activity.name)));
+		name.setForeground(AnchorTheme.TEXT);
+		name.setFont(AnchorTheme.font(Font.BOLD, 16));
+		card.add(name);
+		card.add(Box.createVerticalStrut(4));
 		card.add(muted("Best: " + diaryBestResult(activity)));
-		for (AnchorModels.PvmDiaryTier tier : activity.tiers) {
-			card.add(Box.createVerticalStrut(2));
+		card.add(muted(number(activity.earnedPoints) + " points earned"));
+		if (activity.tiers != null) for (AnchorModels.PvmDiaryTier tier : activity.tiers) {
+			card.add(Box.createVerticalStrut(6));
 			card.add(diaryTierRow(tier));
 		}
 		if (activity.pendingCount > 0) {
-			card.add(Box.createVerticalStrut(3));
-			card.add(muted(activity.pendingCount + " submission" + (activity.pendingCount == 1 ? "" : "s") + " pending review"));
+			card.add(Box.createVerticalStrut(6));
+			card.add(wrappedMuted(activity.pendingCount + " submission" + (activity.pendingCount == 1 ? "" : "s") + " pending review"));
 		}
 		return card;
 	}
 
 	private static JPanel diaryTierRow(AnchorModels.PvmDiaryTier tier) {
-		JPanel row = new JPanel(new GridLayout(1, 3, 4, 0));
-		row.setOpaque(false);
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(PANEL_WIDTH, 20));
-		row.add(diaryCategoryLabel(value(tier.tier).toUpperCase(Locale.ROOT), tier.completed ? CONNECTED_COLOR : new Color(170, 173, 176)));
-		row.add(diaryCategoryLabel(value(tier.targetLabel), Color.WHITE));
-		String points = tier.points == 0 ? "—" : "+" + number(tier.points);
-		row.add(diaryCategoryLabel((tier.completed ? "✓ " : "") + points, tier.completed ? CONNECTED_COLOR : SCORE_COLOR));
+		JPanel row = AnchorTheme.surface();
+		row.putClientProperty("fill", tier.completed ? new Color(31, 49, 32) : AnchorTheme.BACKGROUND);
+		row.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		JPanel top = new JPanel(new BorderLayout(4, 0));
+		top.setOpaque(false);
+		top.setAlignmentX(Component.LEFT_ALIGNMENT);
+		JLabel name = label(diaryDisplayName(value(tier.tier)), true);
+		name.setForeground(tier.completed ? CLAN_ACCENT : GOLD);
+		JLabel points = muted((tier.completed ? "Done · " : "") + "+" + number(tier.points));
+		points.setForeground(tier.completed ? CLAN_ACCENT : GOLD);
+		top.add(name, BorderLayout.CENTER);
+		top.add(points, BorderLayout.EAST);
+		row.add(top);
+		row.add(Box.createVerticalStrut(3));
+		row.add(wrappedMuted(diaryDisplayName(value(tier.targetLabel))));
 		return row;
 	}
 
@@ -844,6 +839,7 @@ public class AnchorPanel extends PluginPanel {
 					submissions.removeAll();
 					submissions.add(muted("Unable to load local submissions."));
 				}
+				AnchorTheme.typography(submissions);
 				submissions.revalidate();
 				submissions.repaint();
 			}
@@ -853,6 +849,7 @@ public class AnchorPanel extends PluginPanel {
 	private void renderSubmissions(List<EvidenceStore.Record> records) {
 		submissions.removeAll();
 		JComboBox<SubmissionFilter> filter = new JComboBox<>(SubmissionFilter.values());
+		AnchorTheme.styleComboBox(filter);
 		filter.setSelectedItem(submissionFilter);
 		filter.setToolTipText("Show submissions by type");
 		filter.addActionListener(e -> {
@@ -1130,6 +1127,7 @@ public class AnchorPanel extends PluginPanel {
 				name.putClientProperty("partyIndex", index);
 				name.setToolTipText("RuneScape name");
 				JComboBox<String> role = new JComboBox<>(new String[] { "Unknown", "Clan", "Guest" });
+				AnchorTheme.styleComboBox(role);
 				role.setSelectedItem(Boolean.TRUE.equals(member.clanMember) ? "Clan"
 						: Boolean.FALSE.equals(member.clanMember) ? "Guest" : "Unknown");
 				role.putClientProperty("partyIndex", index);
@@ -1173,11 +1171,12 @@ public class AnchorPanel extends PluginPanel {
 		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 		JPanel text = verticalPanel();
 		text.setOpaque(false);
+		text.setOpaque(false);
 		text.add(sectionHeading(eventLabel(record, group)));
 		text.add(Box.createVerticalStrut(2));
 		JLabel title = new JLabel(title(record));
 		title.setForeground(Color.WHITE);
-		title.setFont(title.getFont().deriveFont(Font.BOLD));
+		title.setFont(AnchorTheme.font(Font.BOLD, 13f));
 		title.setToolTipText(title.getText());
 		text.add(title);
 		heading.add(text, BorderLayout.CENTER);
@@ -1230,18 +1229,18 @@ public class AnchorPanel extends PluginPanel {
 		return panel;
 	}
 
-	private static JButton actionButton(String text, boolean primary) {
+	static JButton actionButton(String text, boolean primary) {
 		JButton button = new JButton(text);
-		button.setForeground(primary ? TAB_ACTIVE_FG : new Color(205, 208, 211));
-		button.setFont(button.getFont().deriveFont(Font.BOLD, 11f));
+		button.setForeground(primary ? GOLD : AnchorTheme.MUTED);
+		button.setFont(AnchorTheme.font(Font.BOLD, 11f));
 		button.setFocusPainted(false);
 		button.setBorderPainted(false);
 		button.setContentAreaFilled(false);
 		button.setOpaque(false);
 		button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		button.setMargin(new Insets(0, 8, 0, 8));
-		button.setPreferredSize(new Dimension(0, 27));
-		button.setBackground(primary ? GOLD : new Color(47, 51, 55));
+		button.setPreferredSize(new Dimension(0, 28));
+		button.setBackground(AnchorTheme.BACKGROUND);
 		button.setRolloverEnabled(true);
 		button.setUI(new javax.swing.plaf.basic.BasicButtonUI() {
 			@Override
@@ -1249,13 +1248,17 @@ public class AnchorPanel extends PluginPanel {
 				JButton target = (JButton) component;
 				Graphics2D g = (Graphics2D) graphics.create();
 				g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				boolean navigation = Boolean.TRUE.equals(target.getClientProperty("navigation"));
 				Color background = target.getBackground();
-				if (target.getModel().isPressed())
-					background = background.darker();
-				else if (target.getModel().isRollover())
-					background = primary ? new Color(224, 181, 91) : TAB_HOVER_BG;
+				if (target.getModel().isPressed()) background = background.darker();
+				else if (target.getModel().isRollover() && !target.isSelected()) background = new Color(35, 38, 42);
 				g.setColor(background);
-				g.fillRoundRect(0, 0, target.getWidth(), target.getHeight(), 8, 8);
+				g.fillRoundRect(0, 0, target.getWidth(), target.getHeight(), 6, 6);
+				if (!navigation) {
+					Color accent = primary ? GOLD : AnchorTheme.MUTED;
+					g.setColor(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 120));
+					g.drawRoundRect(0, 0, target.getWidth() - 1, target.getHeight() - 1, 6, 6);
+				}
 				g.dispose();
 				super.paint(graphics, component);
 			}
@@ -1272,7 +1275,7 @@ public class AnchorPanel extends PluginPanel {
 						: status == AnchorModels.EventStatus.DRAFT ? GOLD : new Color(150, 154, 158);
 		JLabel badge = new JLabel(text, SwingConstants.CENTER);
 		badge.setForeground(color);
-		badge.setFont(badge.getFont().deriveFont(Font.BOLD, 10f));
+		badge.setFont(AnchorTheme.font(Font.BOLD, 10f));
 		badge.setBorder(BorderFactory.createCompoundBorder(
 				BorderFactory.createLineBorder(new Color(color.getRed(), color.getGreen(), color.getBlue(), 135)),
 				BorderFactory.createEmptyBorder(3, 6, 3, 6)));
@@ -1315,7 +1318,7 @@ public class AnchorPanel extends PluginPanel {
 	private static JPanel verticalPanel() {
 		JPanel panel = new JPanel();
 		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-		panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		panel.setBackground(AnchorTheme.BACKGROUND);
 		return panel;
 	}
 
@@ -1327,22 +1330,43 @@ public class AnchorPanel extends PluginPanel {
 			}
 		};
 		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-		panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		panel.setBackground(AnchorTheme.BACKGROUND);
 		return panel;
 	}
 
-	private static JPanel card() {
-		JPanel panel = new JPanel() {
-			@Override
-			public Dimension getMaximumSize() {
-				return new Dimension(Integer.MAX_VALUE, super.getPreferredSize().height);
-			}
-		};
-		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-		panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		panel.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
-		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
-		return panel;
+	private static JPanel pageHeading(String title, String subtitle) {
+		JPanel heading = fullWidthVerticalPanel();
+		heading.setBorder(BorderFactory.createEmptyBorder(8, 0, 10, 0));
+		JLabel label = new JLabel(title);
+		label.setFont(AnchorTheme.font(Font.BOLD, 16f));
+		label.setForeground(GOLD);
+		heading.add(label);
+		if (!subtitle.isEmpty()) {
+			heading.add(Box.createVerticalStrut(4));
+			heading.add(wrappedMuted(subtitle));
+		}
+		return heading;
+	}
+
+	private static JPanel card() { return AnchorTheme.surface(); }
+
+	private static JPanel pointSummary(String title, long points, Integer position, Color accent) {
+		JPanel card = card();
+		card.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		JLabel amount = new JLabel(number(points));
+		amount.setAlignmentX(Component.CENTER_ALIGNMENT);
+		amount.setFont(AnchorTheme.font(Font.BOLD, 16));
+		amount.setForeground(accent);
+		card.add(amount);
+		JLabel caption = muted(title);
+		caption.setAlignmentX(Component.CENTER_ALIGNMENT);
+		caption.setHorizontalAlignment(SwingConstants.CENTER);
+		card.add(caption);
+		JLabel place = muted(position == null ? "Unranked" : "#" + position + " overall");
+		place.setAlignmentX(Component.CENTER_ALIGNMENT);
+		place.setHorizontalAlignment(SwingConstants.CENTER);
+		card.add(place);
+		return card;
 	}
 
 	static JScrollPane scroll(JPanel panel) {
@@ -1351,24 +1375,31 @@ public class AnchorPanel extends PluginPanel {
 
 	static JScrollPane scroll(JPanel panel, boolean reserveScrollbarSpace) {
 		ViewportWidthPanel viewport = new ViewportWidthPanel();
+		viewport.setBorder(BorderFactory.createEmptyBorder(0, 6, 8, 6));
 		viewport.add(panel, BorderLayout.NORTH);
 		JScrollPane scroll = new JScrollPane(viewport);
 		scroll.setBorder(null);
-		scroll.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		scroll.setBackground(AnchorTheme.BACKGROUND);
+		scroll.getViewport().setBackground(AnchorTheme.BACKGROUND);
 		scroll.getViewport().setOpaque(true);
 		scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-		// Keep the sidebar width stable when Extra Settings changes the available height.
-		scroll.setVerticalScrollBarPolicy(reserveScrollbarSpace
-				? JScrollPane.VERTICAL_SCROLLBAR_ALWAYS : JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+		// A narrow scrollbar leaves room for content at standard sidebar widths.
+		scroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
 		scroll.getVerticalScrollBar().setUnitIncrement(16);
+		scroll.getVerticalScrollBar().setPreferredSize(new Dimension(6, 0));
+		scroll.getVerticalScrollBar().setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
+			@Override protected void configureScrollBarColors() { thumbColor = new Color(68, 73, 81); trackColor = AnchorTheme.BACKGROUND; }
+			@Override protected JButton createDecreaseButton(int orientation) { return hiddenScrollButton(); }
+			@Override protected JButton createIncreaseButton(int orientation) { return hiddenScrollButton(); }
+			private JButton hiddenScrollButton() { JButton b = new JButton(); b.setPreferredSize(new Dimension(0, 0)); return b; }
+		});
 		return scroll;
 	}
 
 	private static final class ViewportWidthPanel extends JPanel implements Scrollable {
 		private ViewportWidthPanel() {
 			super(new BorderLayout());
-			setBackground(ColorScheme.DARK_GRAY_COLOR);
+			setBackground(AnchorTheme.BACKGROUND);
 		}
 
 		@Override
@@ -1402,15 +1433,17 @@ public class AnchorPanel extends PluginPanel {
 		JLabel label = new JLabel(html(esc(text)));
 		label.setForeground(Color.WHITE);
 		if (bold)
-			label.setFont(label.getFont().deriveFont(Font.BOLD));
+			label.setFont(AnchorTheme.font(Font.BOLD, 13f));
 		label.setAlignmentX(Component.LEFT_ALIGNMENT);
 		label.setMaximumSize(new Dimension(PANEL_WIDTH, 40));
 		return label;
 	}
 
 	private static JLabel muted(String text) {
-		JLabel label = new JLabel(html("<span style='color:#aaaaaa'>" + esc(text) + "</span>"));
-		label.setForeground(Color.LIGHT_GRAY);
+		JLabel label = new JLabel(text);
+		label.putClientProperty("html.disable", Boolean.TRUE);
+		label.setFont(AnchorTheme.font(Font.PLAIN, 11));
+		label.setForeground(AnchorTheme.MUTED);
 		label.setAlignmentX(Component.LEFT_ALIGNMENT);
 		label.setMaximumSize(new Dimension(PANEL_WIDTH, 40));
 		return label;
@@ -1418,6 +1451,8 @@ public class AnchorPanel extends PluginPanel {
 
 	private static JLabel wrappedMuted(String text) {
 		JLabel label = muted(text);
+		label.putClientProperty("html.disable", Boolean.FALSE);
+		label.setText("<html><div style='width:" + (PANEL_WIDTH - 60) + "px'>" + esc(text) + "</div></html>");
 		label.setMaximumSize(new Dimension(PANEL_WIDTH, Integer.MAX_VALUE));
 		return label;
 	}
@@ -1439,7 +1474,7 @@ public class AnchorPanel extends PluginPanel {
 	private static JLabel sectionHeading(String text) {
 		JLabel heading = new JLabel(text);
 		heading.setForeground(new Color(155, 158, 161));
-		heading.setFont(heading.getFont().deriveFont(Font.BOLD, 12f));
+		heading.setFont(AnchorTheme.font(Font.BOLD, 12f));
 		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return heading;
 	}
@@ -1447,48 +1482,9 @@ public class AnchorPanel extends PluginPanel {
 	private static JLabel competitionSectionHeading(String text, Color color) {
 		JLabel heading = new JLabel(text);
 		heading.setForeground(color);
-		heading.setFont(heading.getFont().deriveFont(Font.BOLD, 11f));
+		heading.setFont(AnchorTheme.font(Font.BOLD, 11f));
 		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return heading;
-	}
-
-	private static JPanel statRow(String leftLabel, String leftValue, Color leftColor,
-			String rightLabel, String rightValue, Color rightColor) {
-		JPanel row = new JPanel(new GridLayout(1, 2, 8, 0));
-		row.setOpaque(false);
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(PANEL_WIDTH, 34));
-		row.add(stat(leftLabel, leftValue, leftColor));
-		row.add(stat(rightLabel, rightValue, rightColor));
-		return row;
-	}
-
-	private static JPanel stat(String label, String value, Color color) {
-		JPanel stat = new JPanel(new BorderLayout(0, 1));
-		stat.setOpaque(false);
-		JLabel name = new JLabel(label);
-		name.setForeground(new Color(145, 148, 151));
-		name.setFont(name.getFont().deriveFont(Font.BOLD, 11f));
-		JLabel amount = new JLabel(value);
-		amount.setForeground(color);
-		amount.setFont(amount.getFont().deriveFont(Font.BOLD, 14f));
-		stat.add(name, BorderLayout.NORTH);
-		stat.add(amount, BorderLayout.CENTER);
-		return stat;
-	}
-
-	private static JPanel nextRank(String rankName) {
-		JPanel row = new JPanel(new BorderLayout(8, 0));
-		row.setOpaque(false);
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(PANEL_WIDTH, 22));
-		JLabel label = sectionHeading("NEXT RANK");
-		JLabel value = new JLabel(rankName, SwingConstants.RIGHT);
-		value.setForeground(SCORE_COLOR);
-		value.setFont(value.getFont().deriveFont(Font.BOLD, 13f));
-		row.add(label, BorderLayout.WEST);
-		row.add(value, BorderLayout.EAST);
-		return row;
 	}
 
 	private static JPanel weeklyTimer(String timing) {
@@ -1498,13 +1494,13 @@ public class AnchorPanel extends PluginPanel {
 				BorderFactory.createMatteBorder(0, 3, 0, 0, GOLD),
 				BorderFactory.createEmptyBorder(6, 8, 6, 8)));
 		p.setAlignmentX(Component.LEFT_ALIGNMENT);
-		p.setMaximumSize(new Dimension(PANEL_WIDTH, 34));
+		p.setMaximumSize(new Dimension(PANEL_WIDTH, 42));
 		JLabel title = new JLabel("WEEKLY EVENTS");
 		title.setForeground(new Color(155, 158, 161));
-		title.setFont(title.getFont().deriveFont(Font.BOLD, 11f));
+		title.setFont(AnchorTheme.font(Font.BOLD, 11f));
 		JLabel value = new JLabel(timing.toUpperCase(Locale.ROOT), SwingConstants.RIGHT);
 		value.setForeground(SCORE_COLOR);
-		value.setFont(value.getFont().deriveFont(Font.BOLD, 12f));
+		value.setFont(AnchorTheme.font(Font.BOLD, 12f));
 		p.add(title, BorderLayout.WEST);
 		p.add(value, BorderLayout.EAST);
 		return p;
@@ -1537,15 +1533,15 @@ public class AnchorPanel extends PluginPanel {
 		rankLabel.setForeground(rank <= RANK_COLORS.length
 				? RANK_COLORS[Math.max(0, rank - 1)]
 				: highlighted ? accent : new Color(160, 163, 166));
-		rankLabel.setFont(rankLabel.getFont().deriveFont(Font.BOLD, 12f));
+		rankLabel.setFont(AnchorTheme.font(Font.BOLD, 12f));
 		rankLabel.setPreferredSize(new Dimension(18, 18));
 		JLabel nameLabel = new JLabel(name);
 		nameLabel.setForeground(new Color(225, 225, 225));
-		nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD, 12f));
+		nameLabel.setFont(AnchorTheme.font(Font.BOLD, 12f));
 		nameLabel.setToolTipText(name);
 		JLabel scoreLabel = new JLabel(styledScore(score), SwingConstants.RIGHT);
 		scoreLabel.setForeground(SCORE_COLOR);
-		scoreLabel.setFont(scoreLabel.getFont().deriveFont(Font.BOLD, 12f));
+		scoreLabel.setFont(AnchorTheme.font(Font.BOLD, 12f));
 		scoreLabel.setToolTipText(score);
 		int scoreWidth = Math.min(90, scoreLabel.getPreferredSize().width);
 		scoreLabel.setPreferredSize(new Dimension(scoreWidth, 18));
@@ -1585,28 +1581,27 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private static JPanel progress(String name, long current, long remaining, Color accent) {
-		return progress(name, current, remaining, accent, true);
+		return progress(name, current, remaining, accent, false);
 	}
 
 	private static JPanel progress(String name, long current, long remaining, Color accent, boolean showRemaining) {
-		JPanel p = verticalPanel();
-		p.setOpaque(false);
-		p.setAlignmentX(Component.LEFT_ALIGNMENT);
-		p.setMaximumSize(new Dimension(PANEL_WIDTH, 40));
-		long target = Math.max(1, current + remaining);
-		JProgressBar bar = new JProgressBar(0, 1000);
-		bar.setValue((int) Math.min(1000, current * 1000 / target));
-		bar.setStringPainted(true);
-		bar.setString(name + ": " + number(current) + " / " + number(target));
-		bar.setForeground(accent);
-		bar.setBackground(new Color(43, 46, 49));
-		bar.setBorder(BorderFactory.createEmptyBorder());
-		bar.setMaximumSize(new Dimension(PANEL_WIDTH, 21));
-		bar.setFont(bar.getFont().deriveFont(Font.BOLD, 11f));
-		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
-		p.add(bar);
-		if (showRemaining) p.add(muted(number(remaining) + " remaining"));
-		return p;
+		JPanel panel = fullWidthVerticalPanel();
+		panel.setOpaque(false);
+		JPanel labels = new JPanel(new BorderLayout());
+		labels.setOpaque(false);
+		labels.setAlignmentX(Component.LEFT_ALIGNMENT);
+		labels.add(muted(name), BorderLayout.WEST);
+		JLabel amount = muted(number(current) + " / " + number(current + remaining));
+		amount.setForeground(AnchorTheme.TEXT);
+		labels.add(amount, BorderLayout.EAST);
+		panel.add(labels);
+		panel.add(Box.createVerticalStrut(7));
+		panel.add(AnchorTheme.bar(current, current + remaining, accent));
+		if (showRemaining) {
+			panel.add(Box.createVerticalStrut(5));
+			panel.add(muted(remaining > 0 ? number(remaining) + " to go" : "Requirement met"));
+		}
+		return panel;
 	}
 
 	private static String eventLabel(EvidenceStore.Record record, List<EvidenceStore.Record> group) {
@@ -1795,7 +1790,7 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private static String html(String value) {
-		return "<html><div style='width:" + (PANEL_WIDTH - 60) + "px'>" + value + "</div></html>";
+		return "<html>" + value + "</html>";
 	}
 
 	private static String esc(String value) {
@@ -1843,10 +1838,15 @@ public class AnchorPanel extends PluginPanel {
 
 	private static final class AspectRatioIconLabel extends JLabel {
 		private int aspectHeight = -1;
+		private final int heightLimit;
 
-		private AspectRatioIconLabel() {
+		private AspectRatioIconLabel() { this(Integer.MAX_VALUE); }
+
+		private AspectRatioIconLabel(int heightLimit) {
+			this.heightLimit = heightLimit;
+			if (heightLimit < Integer.MAX_VALUE) setPreferredSize(new Dimension(PANEL_WIDTH, heightLimit));
 			setOpaque(true);
-			setBackground(ColorScheme.DARK_GRAY_COLOR);
+			setBackground(AnchorTheme.BACKGROUND);
 			addComponentListener(new ComponentAdapter() {
 				@Override
 				public void componentResized(ComponentEvent event) {
@@ -1860,7 +1860,7 @@ public class AnchorPanel extends PluginPanel {
 			int width = getWidth();
 			if (width <= 0 || icon == null || icon.getIconWidth() <= 0 || icon.getIconHeight() <= 0)
 				return;
-			int height = Math.max(1, (int) Math.round((double) width * icon.getIconHeight() / icon.getIconWidth()));
+			int height = Math.min(heightLimit, Math.max(1, (int) Math.round((double) width * icon.getIconHeight() / icon.getIconWidth())));
 			if (height == aspectHeight)
 				return;
 			aspectHeight = height;
@@ -1884,7 +1884,9 @@ public class AnchorPanel extends PluginPanel {
 			Graphics2D g = (Graphics2D) graphics.create();
 			g.setColor(getBackground());
 			g.fillRect(0, 0, getWidth(), getHeight());
-			g.scale((double) getWidth() / icon.getIconWidth(), (double) getHeight() / icon.getIconHeight());
+			double scale = Math.max((double) getWidth() / icon.getIconWidth(), (double) getHeight() / icon.getIconHeight());
+			g.translate((getWidth() - icon.getIconWidth() * scale) / 2, getHeight() - icon.getIconHeight() * scale);
+			g.scale(scale, scale);
 			icon.paintIcon(this, g, 0, 0);
 			g.dispose();
 		}
@@ -1927,10 +1929,10 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private static BufferedImage placeholderAvatar() {
-		BufferedImage i = new BufferedImage(58, 58, BufferedImage.TYPE_INT_ARGB);
+		BufferedImage i = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D g = i.createGraphics();
 		g.setColor(new Color(40, 52, 68));
-		g.fillRect(0, 0, 58, 58);
+		g.fillRect(0, 0, 32, 32);
 		g.setColor(GOLD);
 		g.setFont(new Font("SansSerif", Font.BOLD, 28));
 		g.drawString("A", 20, 39);

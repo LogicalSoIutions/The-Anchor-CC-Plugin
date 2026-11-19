@@ -38,6 +38,23 @@ public final class AnchorModels
 		public CompetitionRank rotmRank;
 	}
 
+	public static final class Leaderboards
+	{
+		public List<LeaderboardMember> members = new ArrayList<>();
+		public String updatedAt;
+	}
+
+	public static final class LeaderboardMember
+	{
+		public String name;
+		public long pvmPoints;
+		public long clanPoints;
+		public Integer pvmRank;
+		public Integer clanRank;
+		public String currentRank;
+		public int rankOrder;
+	}
+
 	public static final class CompetitionRank
 	{
 		public Integer rank;
@@ -53,6 +70,7 @@ public final class AnchorModels
 		public String name;
 		public long pvmPointsRemaining;
 		public long clanPointsRemaining;
+		public String additionalRequirement;
 	}
 
 	public static final class Competitions

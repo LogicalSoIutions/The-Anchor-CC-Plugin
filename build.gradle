@@ -45,6 +45,11 @@ tasks.register('run', JavaExec) {
 	args '--developer-mode', '--debug'
 }
 
+tasks.named('jar', Jar) {
+	from('LICENSE')
+	from('LICENSES') { into 'LICENSES' }
+}
+
 tasks.register('shadowJar', Jar) {
 	dependsOn classes
 	duplicatesStrategy = DuplicatesStrategy.EXCLUDE

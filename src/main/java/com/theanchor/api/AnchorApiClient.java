@@ -91,6 +91,11 @@ public class AnchorApiClient
 		get("/api/clan/profile?name=" + encode(name), false, AnchorModels.Profile.class, callback);
 	}
 
+	public void getLeaderboards(ResultCallback<AnchorModels.Leaderboards> callback)
+	{
+		get("/api/clan/leaderboards", false, AnchorModels.Leaderboards.class, callback);
+	}
+
 	public void getCompetitions(ResultCallback<AnchorModels.Competitions> callback)
 	{
 		get("/api/competitions", false, AnchorModels.Competitions.class, callback);

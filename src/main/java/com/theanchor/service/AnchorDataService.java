@@ -26,6 +26,9 @@ public class AnchorDataService
 	@Inject private RulesService rules;
 	private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
 	private volatile AnchorModels.Profile profile;
+	private volatile AnchorModels.Leaderboards leaderboards;
+	private volatile String leaderboardMessage = "Rankings have not loaded yet";
+	private boolean leaderboardsLoading;
 	private volatile AnchorModels.CompetitionPanels competitionPanels;
 	private volatile AnchorModels.PvmDiaryStatus pvmDiaryStatus;
 	private volatile BufferedImage profileImage;
@@ -42,6 +45,28 @@ public class AnchorDataService
 
 	public void addListener(Runnable listener) { listeners.add(listener); }
 	public void removeListener(Runnable listener) { listeners.remove(listener); }
+	public AnchorModels.Leaderboards leaderboards() { return leaderboards; }
+	public String leaderboardMessage() { return leaderboardMessage; }
+
+	public synchronized void refreshLeaderboards()
+	{
+		if (leaderboardsLoading) return;
+		leaderboardsLoading = true;
+		leaderboardMessage = "Loading clan rankings…";
+		notifyListeners();
+		api.getLeaderboards(result -> {
+			synchronized (this) { leaderboardsLoading = false; }
+			if (result.isSuccessful() && result.value != null) {
+				leaderboards = result.value;
+				leaderboardMessage = "";
+			} else {
+				leaderboardMessage = leaderboards == null ? "Rankings are currently unavailable. Try refreshing."
+					: "Refresh failed. Showing previously loaded rankings.";
+			}
+			notifyListeners();
+		});
+	}
+
 	public AnchorModels.Profile profile() { return profile; }
 	public AnchorModels.CompetitionPanels competitionPanels() { return competitionPanels; }
 	public AnchorModels.PvmDiaryStatus pvmDiaryStatus() { return pvmDiaryStatus; }
