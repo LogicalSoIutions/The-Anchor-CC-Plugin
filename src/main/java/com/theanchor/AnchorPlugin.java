@@ -111,6 +111,7 @@ public class AnchorPlugin extends Plugin
 	{
 		eventBus.register(clanWorldSorter);
 		eventBus.register(clanMemberNotes);
+		overlayManager.add(clanMemberNotes);
 		clientThread.invokeLater(clanWorldSorter::refresh);
 		navigation = NavigationButton.builder().tooltip("The Anchor").icon(loadIcon()).priority(5).panel(panel).build(); toolbar.addNavigation(navigation);
 		overlayManager.add(collectionLogSyncOverlay);
@@ -135,6 +136,7 @@ public class AnchorPlugin extends Plugin
 	{
 		eventBus.unregister(clanWorldSorter);
 		eventBus.unregister(clanMemberNotes);
+		overlayManager.remove(clanMemberNotes);
 		clientThread.invokeLater(clanWorldSorter::shutDown);
 		if (refreshTask != null) { refreshTask.cancel(false); refreshTask = null; }
 		if (progressTask != null) { progressTask.cancel(false); progressTask = null; }
