@@ -15,6 +15,12 @@ RuneLite Plugin Hub project for The Anchor clan.
 - One-time collection-log prompt, then automatic full item/quantity sync when your collection log is opened and finishes loading, at most once per 24 hours per account after a successful sync. The in-log Anchor refresh button can sync anytime.
 - Permanent Discord `/connect` code authentication using an `Authorization: Bearer` header.
 
+## Clan member notes
+
+Right-click a member in the clan side panel and select **Add note**. Existing notes have an **Edit note** option that opens the saved text. Notes are limited to 255 characters; clear the text and submit to delete a note, or press Escape to cancel.
+
+Notes are personal and saved in RuneLite configuration, independently of your friends list and Anchor authentication. They are keyed by player name, so a name change requires recreating the note under the new name. They are not sent to The Anchor or shared with clan members.
+
 ## Local development
 
 ### Clan / raid debug

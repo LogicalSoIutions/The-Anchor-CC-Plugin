@@ -159,8 +159,7 @@ public class PersonalBestService
 	@Subscribe public void onChatMessage(ChatMessage event)
 	{
 		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) return;
-		String rawMessage = event.getMessage().replaceAll("(?i)<br\\s*/?>", " ");
-		String message = Text.removeTags(rawMessage).replace('\u00A0', ' ').replaceAll("\\s+", " ").trim();
+		String message = normalizeCompletionMessage(event.getMessage());
 		Double colosseumSeconds = colosseumCompletionDuration(message);
 		if (colosseumSeconds != null)
 		{
@@ -302,6 +301,15 @@ public class PersonalBestService
 		if (boss.equalsIgnoreCase("TzKal-Zuk")) return "Inferno";
 		if (boss.equalsIgnoreCase("Sol Heredit")) return "Fortis Colosseum";
 		return boss.toLowerCase(Locale.ROOT).contains("corrupted") ? "Corrupted Gauntlet" : "Gauntlet";
+	}
+
+	static String normalizeCompletionMessage(String message)
+	{
+		// Game messages can use symbolic colour tags as well as <col=...>.
+		// These must be removed before matching a duration immediately after ':'.
+		String rawMessage = message.replaceAll("(?i)<br\\s*/?>", " ");
+		return Text.removeTags(rawMessage).replaceAll("@[A-Za-z][A-Za-z0-9_]*@", "")
+			.replace('\u00A0', ' ').replaceAll("\\s+", " ").trim();
 	}
 
 	static String specialActivityFromCompletion(String message)
