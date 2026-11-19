@@ -36,6 +36,8 @@ final class PetItems
 		Map.entry("tempoross", "Tiny tempor"), Map.entry("zalcano", "Smolcano"),
 		Map.entry("chambers of xeric", "Olmlet"), Map.entry("chambers of xeric challenge mode", "Olmlet"),
 		Map.entry("theatre of blood", "Lil' zik"), Map.entry("theatre of blood hard mode", "Lil' zik"),
+		Map.entry("the fractured archive", "Orion"), Map.entry("fractured archive", "Orion"),
+		Map.entry("ocellus", "Orion"),
 		Map.entry("tombs of amascut", "Tumeken's guardian"),
 		Map.entry("tombs of amascut expert mode", "Tumeken's guardian")
 	);
@@ -53,7 +55,7 @@ final class PetItems
 		"bloodhound", "bran", "butch", "callisto cub", "chompy chick", "dom", "giant squirrel",
 		"gull", "hellpuppy", "herbi", "heron", "huberte", "ikkle hydra", "jal-nib-rek",
 		"kalphite princess", "lil' creator", "lil' zik", "lil'viathan", "little nightmare", "moxi",
-		"muphin", "nexling", "nid", "noon", "olmlet", "phoenix", "prince black dragon",
+		"muphin", "nexling", "nid", "noon", "olmlet", "orion", "phoenix", "prince black dragon",
 		"quetzin", "rift guardian", "rock golem", "rocky", "scorpia's offspring", "scurry", "skotos",
 		"smol heredit", "smolcano", "soup", "sraracha", "tangleroot", "tiny tempor",
 		"tumeken's guardian", "tzrek-jad", "venenatis spiderling", "vet'ion jr.", "vorki", "wisp",
