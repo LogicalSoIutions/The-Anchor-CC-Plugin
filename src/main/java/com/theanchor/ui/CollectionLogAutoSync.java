@@ -7,7 +7,11 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
+import net.runelite.api.MenuAction;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ScriptPostFired;
+import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
@@ -21,6 +25,8 @@ import net.runelite.client.eventbus.Subscribe;
 public class CollectionLogAutoSync
 {
 	private static final int CAPTURE_TIMEOUT_TICKS = 20;
+	private static final int COLLECTION_LOG_SETUP = 7797;
+	private static final int COLLECTION_INIT_SCRIPT = 2240;
 
 	private final Client client;
 	private final ClientThread clientThread;
@@ -29,7 +35,8 @@ public class CollectionLogAutoSync
 	private final CollectionLogSyncService collectionLogSync;
 	private boolean waitingForCapture;
 	private boolean uploadInProgress;
-	private long attemptedAccountHash;
+	private boolean fullCaptureRequested;
+	private long captureAccountHash;
 	private int openedAtTick = Integer.MAX_VALUE;
 	private int captureDeadlineTick = -1;
 
@@ -54,9 +61,10 @@ public class CollectionLogAutoSync
 		eventBus.unregister(this);
 		waitingForCapture = false;
 		uploadInProgress = false;
+		fullCaptureRequested = false;
 	}
 
-	/** Re-arms capture or immediately syncs when the in-log Anchor button is clicked. */
+	/** Requests fresh full-log data when the in-log Anchor button is clicked. */
 	void refreshRequested()
 	{
 		if (!data.isCurrentPlayerClanMember()) return;
@@ -65,16 +73,9 @@ public class CollectionLogAutoSync
 			message("A sync is already in progress.");
 			return;
 		}
-		attemptedAccountHash = 0L;
-		if (collectionLogSync.hasCapturedItems())
-		{
-			startUpload();
-		}
-		else
-		{
-			armCapture();
-			message("Open the collection-log Search to load data for The Anchor...");
-		}
+		if (isPohLog()) return;
+		armCapture();
+		requestFullCapture();
 	}
 
 	@Subscribe
@@ -82,18 +83,38 @@ public class CollectionLogAutoSync
 	{
 		if (!data.isCurrentPlayerClanMember()
 			|| event.getGroupId() != InterfaceID.COLLECTION || isPohLog()) return;
-		long accountHash = client.getAccountHash();
-		if (accountHash == 0L || waitingForCapture || uploadInProgress || attemptedAccountHash == accountHash
-			|| collectionLogSync.hasSyncedCurrentAccount()) return;
-
+		if (client.getAccountHash() == 0L || uploadInProgress || !collectionLogSync.isAutomaticSyncDue()) return;
 		armCapture();
+	}
+
+	@Subscribe
+	public void onScriptPostFired(ScriptPostFired event)
+	{
+		if (event.getScriptId() != COLLECTION_LOG_SETUP || !waitingForCapture || fullCaptureRequested) return;
+		requestFullCapture();
+	}
+
+	@Subscribe
+	public void onWidgetClosed(WidgetClosed event)
+	{
+		if (event.getGroupId() != InterfaceID.COLLECTION) return;
+		waitingForCapture = false;
+		fullCaptureRequested = false;
 	}
 
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
-		if (!waitingForCapture || uploadInProgress) return;
-		if (collectionLogSync.isCaptureReadySince(openedAtTick))
+		if (!waitingForCapture) return;
+		if (client.getGameState() != GameState.LOGGED_IN || isPohLog()
+			|| client.getAccountHash() != captureAccountHash || !data.isCurrentPlayerClanMember())
+		{
+			waitingForCapture = false;
+			return;
+		}
+		if (fullCaptureRequested && !uploadInProgress
+			&& data.connection() == AnchorDataService.Connection.CONNECTED
+			&& collectionLogSync.isCaptureReadySince(openedAtTick))
 		{
 			startUpload();
 		}
@@ -111,6 +132,25 @@ public class CollectionLogAutoSync
 		openedAtTick = client.getTickCount();
 		captureDeadlineTick = openedAtTick + CAPTURE_TIMEOUT_TICKS;
 		waitingForCapture = true;
+		fullCaptureRequested = false;
+		captureAccountHash = client.getAccountHash();
+	}
+
+	/**
+	 * Search requests every entry from the server; init restores the player's normal view.
+	 * Follows RuneProfile/WikiSync's collection-log retrieval flow (see LICENSES/reference-plugins.txt).
+	 */
+	private void requestFullCapture()
+	{
+		if (isPohLog() || client.getGameState() != GameState.LOGGED_IN
+			|| client.getWidget(InterfaceID.Collection.SEARCH_TOGGLE) == null) return;
+		// Set the guard before init, which fires COLLECTION_LOG_SETUP again.
+		fullCaptureRequested = true;
+		collectionLogSync.beginCapture();
+		openedAtTick = client.getTickCount();
+		captureDeadlineTick = openedAtTick + CAPTURE_TIMEOUT_TICKS;
+		client.menuAction(-1, InterfaceID.Collection.SEARCH_TOGGLE, MenuAction.CC_OP, 1, -1, "Search", null);
+		client.runScript(COLLECTION_INIT_SCRIPT);
 	}
 
 	private void startUpload()
@@ -127,7 +167,6 @@ public class CollectionLogAutoSync
 		}
 		waitingForCapture = false;
 		uploadInProgress = true;
-		attemptedAccountHash = client.getAccountHash();
 		if (collectionLogSync.syncCapturedItems(this::onSyncFinished))
 		{
 			message("Syncing your collection log with The Anchor...");
@@ -135,7 +174,6 @@ public class CollectionLogAutoSync
 		else
 		{
 			uploadInProgress = false;
-			attemptedAccountHash = 0L;
 			log.error("Automatic collection log sync lost capture readiness before upload");
 			message("Collection data is still loading. Wait a moment and try again.");
 		}

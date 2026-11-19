@@ -95,6 +95,13 @@ public class CollectionLogSyncService
 		}
 	}
 
+	/** Discards the previous opening's rows before requesting a fresh full log. */
+	public void beginCapture()
+	{
+		synchronized (items) { items.clear(); }
+		lastItemScriptTick = -1;
+	}
+
 	/** Called after the open collection log has finished populating its item rows. */
 	public boolean syncCapturedItems()
 	{
@@ -153,6 +160,11 @@ public class CollectionLogSyncService
 	{
 		return Long.toString(client.getAccountHash()).equals(lastSuccessfulAccountHash)
 			|| promptState.hasSyncedForCurrentAccount();
+	}
+
+	public boolean isAutomaticSyncDue()
+	{
+		return promptState.isAutomaticSyncDue();
 	}
 
 	public void retryPending()
