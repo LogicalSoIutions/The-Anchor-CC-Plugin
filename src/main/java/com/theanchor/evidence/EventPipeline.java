@@ -44,6 +44,7 @@ public class EventPipeline
 	@Inject private EvidenceStore store;
 	@Inject private AnchorApiClient api;
 	@Inject private RulesService rules;
+	@Inject private com.theanchor.pb.PvmDiaryContractService diaryContract;
 	@Inject private PartyTracker parties;
 	@Inject private ScheduledExecutorService executor;
 
@@ -75,6 +76,7 @@ public class EventPipeline
 		java.util.Map<String, Object> details, boolean includeParty, String rulesVersionOverride,
 		boolean screenshotRequired, boolean finalizeSubmission, AnchorModels.Party partyOverride)
 	{
+		if ("diary".equals(type) && !diaryContract.isEligible(details)) return;
 		Player local = client.getLocalPlayer();
 		long now = System.currentTimeMillis();
 		if (local == null || local.getName() == null || !deduplicator.accept(type + '|' + dedupeKey, now)) return;
@@ -112,6 +114,11 @@ public class EventPipeline
 			{
 				try
 				{
+					if ("diary".equals(type) && !diaryContract.isEligible(envelope.details))
+					{
+						group.captureFinished();
+						return;
+					}
 					refreshStoredGroup(group);
 					envelope.context.put("submissionTypes", group.types());
 					EvidenceStore.Record record = store.saveMetadata(envelope); notifyListeners();
@@ -137,6 +144,11 @@ public class EventPipeline
 			}
 			try
 			{
+				if ("diary".equals(type) && !diaryContract.isEligible(envelope.details))
+				{
+					group.captureFinished();
+					return;
+				}
 				refreshStoredGroup(group);
 				envelope.context.put("submissionTypes", group.types());
 				EvidenceStore.Record record = store.save(envelope, image); notifyListeners();
@@ -190,6 +202,7 @@ public class EventPipeline
 
 	public void upload(EvidenceStore.Record record, boolean manual)
 	{
+		if (!diaryEligible(record)) return;
 		String code = config.authenticationCode() == null ? "" : config.authenticationCode().trim();
 		if (code.isEmpty())
 		{
@@ -199,33 +212,37 @@ public class EventPipeline
 		record.status = AnchorModels.EventStatus.UPLOADING; record.error = null; record.updatedAt = Instant.now().toString(); persist(record);
 		Path screenshot = record.screenshotPath == null || record.screenshotPath.isBlank()
 			? null : Path.of(record.screenshotPath);
-		executor.execute(() -> api.uploadEvent(record.metadata, screenshot, record.format, result ->
+		executor.execute(() ->
 		{
-			if (result.isSuccessful() && result.value != null)
+			if (!diaryEligible(record)) return;
+			api.uploadEvent(record.metadata, screenshot, record.format, result ->
 			{
-				record.submissionId = result.value.submissionId; record.status = parseStatus(result.value.status);
-				record.error = validationSummary(result.value.validationMessages);
-				record.retryCount = 0;
-			}
-			else
-			{
-				record.status = AnchorModels.EventStatus.FAILED;
-				record.error = result.error == null ? "Empty server response" : result.error;
-				record.retryCount++;
-				log.error("Evidence upload failed for event {} ({}): HTTP {}, error={}, retry={}, manual={}",
-					eventId(record), eventType(record), result.statusCode, record.error, record.retryCount, manual);
-				if (!manual && result.isRetryable() && record.retryCount <= 5)
+				if (result.isSuccessful() && result.value != null)
 				{
-					long delay = Math.min(300, 5L << Math.min(6, record.retryCount));
-					executor.schedule(() -> upload(record, false), delay, TimeUnit.SECONDS);
+					record.submissionId = result.value.submissionId; record.status = parseStatus(result.value.status);
+					record.error = validationSummary(result.value.validationMessages);
+					record.retryCount = 0;
 				}
-			}
-			record.updatedAt = Instant.now().toString(); persist(record);
-			// Any completed raid upload can unblock another member, including team
-			// loot that needs manual review or loot the server already submitted.
-			if (isCoordinatedRaidRecord(record)) maybeAutoSubmitRaidGroup(record);
-			else if (record.status == AnchorModels.EventStatus.DRAFT && shouldAutoSubmit(record)) autoSubmit(record);
-		}));
+				else
+				{
+					record.status = AnchorModels.EventStatus.FAILED;
+					record.error = result.error == null ? "Empty server response" : result.error;
+					record.retryCount++;
+					log.error("Evidence upload failed for event {} ({}): HTTP {}, error={}, retry={}, manual={}",
+						eventId(record), eventType(record), result.statusCode, record.error, record.retryCount, manual);
+					if (!manual && result.isRetryable() && record.retryCount <= 5)
+					{
+						long delay = Math.min(300, 5L << Math.min(6, record.retryCount));
+						executor.schedule(() -> upload(record, false), delay, TimeUnit.SECONDS);
+					}
+				}
+				record.updatedAt = Instant.now().toString(); persist(record);
+				// Any completed raid upload can unblock another member, including team
+				// loot that needs manual review or loot the server already submitted.
+				if (isCoordinatedRaidRecord(record)) maybeAutoSubmitRaidGroup(record);
+				else if (record.status == AnchorModels.EventStatus.DRAFT && shouldAutoSubmit(record)) autoSubmit(record);
+			});
+		});
 	}
 
 	private boolean isCoordinatedRaidRecord(EvidenceStore.Record record)
@@ -411,6 +428,19 @@ public class EventPipeline
 	private void updateAndSubmit(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers,
 		List<AnchorModels.PartyMember> partyMembers, String notes, Runnable completion)
 	{
+		if (!diaryEligible(record))
+		{
+			completion.run();
+			return;
+		}
+		if ("diary".equals(eventType(record))
+			&& ((Number) record.metadata.details.get("teamSize")).intValue() != partySize)
+		{
+			record.error = "Party size must match the observed diary activity";
+			persist(record);
+			completion.run();
+			return;
+		}
 		if (record.submissionId == null)
 		{
 			record.error = "Submission ID is unavailable; retry the upload";
@@ -442,6 +472,11 @@ public class EventPipeline
 				log.error("Submission update failed for event {} (submission {}): HTTP {}, error={}",
 					eventId(record), record.submissionId, patched.statusCode, patched.error);
 				persist(record);
+				completion.run();
+				return;
+			}
+			if (!diaryEligible(record))
+			{
 				completion.run();
 				return;
 			}
@@ -486,6 +521,15 @@ public class EventPipeline
 				}
 			}
 		});
+	}
+
+	private boolean diaryEligible(EvidenceStore.Record record)
+	{
+		if (!"diary".equals(eventType(record)) || diaryContract.isEligible(record.metadata.details)) return true;
+		record.status = record.submissionId == null ? AnchorModels.EventStatus.FAILED : AnchorModels.EventStatus.DRAFT;
+		record.error = "Diary result does not meet the current requirements, or the diary contract is unavailable";
+		persist(record);
+		return false;
 	}
 
 	private void persist(EvidenceStore.Record record)

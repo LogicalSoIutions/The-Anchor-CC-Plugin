@@ -57,7 +57,9 @@ public class EvidenceStore
 	{
 		Path outbox = root.resolve("outbox"); Files.createDirectories(outbox);
 		Path target = outbox.resolve(record.metadata.eventId + ".json"); Path temp = target.resolveSibling(target.getFileName() + ".tmp");
-		Files.writeString(temp, gson.toJson(record), StandardCharsets.UTF_8);
+		String json = "diary".equals(record.metadata.eventType)
+			? gson.newBuilder().serializeNulls().create().toJson(record) : gson.toJson(record);
+		Files.writeString(temp, json, StandardCharsets.UTF_8);
 		Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
 	}
 

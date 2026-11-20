@@ -80,6 +80,7 @@ public class AnchorPlugin extends Plugin
 	@Inject private EventPipeline pipeline;
 	@Inject private ImageCache imageCache;
 	@Inject private PersonalBestService pbs;
+	@Inject private com.theanchor.pb.PvmDiaryContractService diaryContract;
 	@Inject private PlayerProgressService progress;
 	@Inject private CollectionLogSyncService collectionLogSync;
 	@Inject private CollectionLogSyncOverlay collectionLogSyncOverlay;
@@ -273,7 +274,7 @@ public class AnchorPlugin extends Plugin
 		String name = currentName();
 		if (name == null || name.isBlank()) return;
 		data.refresh(name);
-		if (featuresActive) { bingo.refresh(); pipeline.refreshStatuses(name); }
+		if (featuresActive) { bingo.refresh(); diaryContract.refresh(); pipeline.refreshStatuses(name); }
 	}
 	private void runScheduledRefresh()
 	{

@@ -108,7 +108,7 @@ public class AnchorApiClient
 
 	public void getPvmDiaryStatus(String rsn, ResultCallback<AnchorModels.PvmDiaryStatus> callback)
 	{
-		get("/api/pvm-diary/status?rsn=" + encode(rsn), false, AnchorModels.PvmDiaryStatus.class, callback);
+		get("/api/pvm-diary/status?name=" + encode(rsn), false, AnchorModels.PvmDiaryStatus.class, callback);
 	}
 
 	public void getPvmDiaryContract(ResultCallback<AnchorModels.PvmDiaryContract> callback)
@@ -132,7 +132,9 @@ public class AnchorApiClient
 	{
 		try
 		{
-			String metadataJson = gson.toJson(metadata);
+			// Completion-only diary requirements explicitly require result: null.
+			String metadataJson = "diary".equals(metadata.eventType)
+				? gson.newBuilder().serializeNulls().create().toJson(metadata) : gson.toJson(metadata);
 			MultipartBody.Builder bodyBuilder = new MultipartBody.Builder().setType(MultipartBody.FORM)
 				.addFormDataPart("metadata", null, RequestBody.create(JSON, metadataJson));
 			long screenshotBytes = 0;

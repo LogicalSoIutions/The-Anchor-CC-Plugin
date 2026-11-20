@@ -24,7 +24,11 @@ public class PvmDiaryContractService
 		{
 			if (result.isSuccessful() && result.value != null && result.value.catalogueVersion != null)
 				contract = result.value;
-			else log.warn("Could not refresh PvM Diary contract: HTTP {}, {}", result.statusCode, result.error);
+			else
+			{
+				contract = null;
+				log.warn("Could not refresh PvM Diary contract: HTTP {}, {}", result.statusCode, result.error);
+			}
 		});
 	}
 
@@ -44,12 +48,13 @@ public class PvmDiaryContractService
 		AnchorModels.PvmDiaryContractActivity activity = supportedActivity(activityId, record.teamSize);
 		if (activity == null || (!"time".equals(activity.kind) && !"completion".equals(activity.kind))) return null;
 		Long result = "completion".equals(activity.kind) ? null : record.durationMillis;
+		if (!meetsTarget(activity, result) || !matchesInvocation(activity, invocation)) return null;
 		return details(activityId, activity.kind, result, record.teamSize, invocation, "raid_completion", sourceId);
 	}
 
 	public java.util.Map<String, Object> detailsForWave(int wave, String sourceId)
 	{
-		if (wave <= 0 || sourceId == null || !isSupported("doom", "wave", 1)) return null;
+		if (sourceId == null || !isDoomWaveEligible(wave)) return null;
 		return details("doom", "wave", Long.valueOf(wave), 1, null, "game_varp", sourceId);
 	}
 
@@ -57,13 +62,58 @@ public class PvmDiaryContractService
 	public boolean isDoomWaveEligible(int wave)
 	{
 		AnchorModels.PvmDiaryContractActivity activity = supportedActivity("doom", 1);
-		if (wave <= 0 || activity == null || !"wave".equals(activity.kind) || activity.tiers == null) return false;
-		Long minimumTarget = null;
+		return activity != null && "wave".equals(activity.kind) && meetsTarget(activity, Long.valueOf(wave));
+	}
+
+	/** Shared gate for capture, persisted retries, and manual submission. */
+	public boolean isEligible(java.util.Map<String, Object> details)
+	{
+		if (details == null || !(details.get("activityId") instanceof String)) return false;
+		Long size = integer(details.get("teamSize"));
+		if (size == null || size <= 0 || size > Integer.MAX_VALUE) return false;
+		AnchorModels.PvmDiaryContractActivity activity = supportedActivity((String) details.get("activityId"), size.intValue());
+		if (activity == null || activity.kind == null || !activity.kind.equals(details.get("resultKind"))) return false;
+		Long invocation = integer(details.get("invocation"));
+		if (details.get("invocation") != null && invocation == null) return false;
+		if (invocation != null && (invocation < 0 || invocation > Integer.MAX_VALUE)) return false;
+		if (!matchesInvocation(activity, invocation == null ? null : invocation.intValue())) return false;
+		Object rawResult = details.get("result");
+		if ("completion".equals(activity.kind)) return details.containsKey("result") && rawResult == null && meetsTarget(activity, null);
+		return meetsTarget(activity, integer(rawResult));
+	}
+
+	private static Long integer(Object value)
+	{
+		if (!(value instanceof Number)) return null;
+		try { return new java.math.BigDecimal(value.toString()).longValueExact(); }
+		catch (NumberFormatException | ArithmeticException e) { return null; }
+	}
+
+	private static boolean matchesInvocation(AnchorModels.PvmDiaryContractActivity activity, Integer invocation)
+	{
+		Integer required = activity.invocation;
+		if (required == null && "toa-300".equals(activity.id)) required = 300;
+		if (required == null && "toa-500".equals(activity.id)) required = 500;
+		return required == null || required.equals(invocation);
+	}
+
+	private static boolean meetsTarget(AnchorModels.PvmDiaryContractActivity activity, Long result)
+	{
+		if (activity.tiers == null) return false;
 		for (AnchorModels.PvmDiaryTier tier : activity.tiers)
-			if (tier != null && tier.target != null && tier.target.longValue() > 0
-				&& (minimumTarget == null || tier.target.longValue() < minimumTarget.longValue()))
-				minimumTarget = tier.target;
-		return minimumTarget != null && wave >= minimumTarget.longValue();
+		{
+			if (tier == null) continue;
+			if ("completion".equals(activity.kind))
+			{
+				if (result == null && tier.target == null) return true;
+			}
+			else if (result != null && result > 0 && tier.target != null && tier.target > 0)
+			{
+				if ("time".equals(activity.kind) && result <= tier.target) return true;
+				if ("wave".equals(activity.kind) && result >= tier.target) return true;
+			}
+		}
+		return false;
 	}
 
 	private static java.util.Map<String, Object> details(String activityId, String resultKind, Long result,
@@ -92,8 +142,7 @@ public class PvmDiaryContractService
 		if ("sol heredit".equals(raw) || "fortis colosseum".equals(raw)) return "colosseum";
 		if ("tzkal-zuk".equals(raw) || "inferno".equals(raw)) return "inferno";
 		if ("tztok-jad".equals(raw) || "tzhaar fight cave".equals(raw)) return "fight-caves";
-		if ("corrupted gauntlet".equals(raw) || "the corrupted gauntlet".equals(raw)
-			|| "gauntlet".equals(raw) || "the gauntlet".equals(raw)) return "cg";
+		if ("corrupted gauntlet".equals(raw) || "the corrupted gauntlet".equals(raw)) return "cg";
 
 		Integer exactTeamSize = exactTeamSize(raw);
 		if (exactTeamSize == null) return null;
@@ -138,19 +187,12 @@ public class PvmDiaryContractService
 		if (teamSize == 4) return prefix + "-four";
 		return teamSize == 5 ? prefix + "-five" : null;
 	}
-
-	private boolean isSupported(String id, String kind, Integer teamSize)
-	{
-		AnchorModels.PvmDiaryContractActivity activity = supportedActivity(id, teamSize);
-		return activity != null && kind.equals(activity.kind);
-	}
-
 	private AnchorModels.PvmDiaryContractActivity supportedActivity(String id, Integer teamSize)
 	{
 		AnchorModels.PvmDiaryContract current = contract;
 		if (id == null || current == null || current.activities == null || teamSize == null) return null;
 		for (AnchorModels.PvmDiaryContractActivity activity : current.activities)
-			if (id.equals(activity.id) && teamSize.intValue() == activity.teamSize) return activity;
+			if (activity != null && id.equals(activity.id) && teamSize.intValue() == activity.teamSize) return activity;
 		return null;
 	}
 }
