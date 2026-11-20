@@ -25,6 +25,48 @@ public class AnchorDataService
 	@Inject private ImageCache images;
 	@Inject private RulesService rules;
 	private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
+	private static final long MEMBER_CACHE_NANOS = java.util.concurrent.TimeUnit.MINUTES.toNanos(5);
+	private final java.util.Map<String, CachedMemberProgress> memberProgressCache = new java.util.LinkedHashMap<>();
+	private final java.util.Map<String, List<AnchorApiClient.ResultCallback<AnchorModels.MemberProgress>>> memberProgressRequests = new java.util.HashMap<>();
+
+	private static final class CachedMemberProgress {
+		private final AnchorModels.MemberProgress progress;
+		private final long cachedAt = System.nanoTime();
+		private CachedMemberProgress(AnchorModels.MemberProgress progress) { this.progress = progress; }
+	}
+
+	/** Public member summaries only; deduplicate concurrent clicks and retain at most 50 profiles. */
+	public void loadMemberProgress(String name, AnchorApiClient.ResultCallback<AnchorModels.MemberProgress> callback) {
+		String key = name.trim().toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
+		CachedMemberProgress cached;
+		synchronized (memberProgressCache) {
+			cached = memberProgressCache.get(key);
+			if (cached != null && System.nanoTime() - cached.cachedAt >= MEMBER_CACHE_NANOS) {
+				memberProgressCache.remove(key);
+				cached = null;
+			}
+			if (cached == null) {
+				List<AnchorApiClient.ResultCallback<AnchorModels.MemberProgress>> pending = memberProgressRequests.get(key);
+				if (pending != null) { pending.add(callback); return; }
+				pending = new java.util.ArrayList<>();
+				pending.add(callback);
+				memberProgressRequests.put(key, pending);
+			}
+		}
+		if (cached != null) { callback.complete(AnchorApiClient.ApiResult.ok(200, cached.progress)); return; }
+		api.getMemberProgress(name, result -> {
+			List<AnchorApiClient.ResultCallback<AnchorModels.MemberProgress>> waiting;
+			synchronized (memberProgressCache) {
+				if (result.isSuccessful() && result.value != null) {
+					memberProgressCache.put(key, new CachedMemberProgress(result.value));
+					while (memberProgressCache.size() > 50) memberProgressCache.remove(memberProgressCache.keySet().iterator().next());
+				}
+				waiting = memberProgressRequests.remove(key);
+			}
+			if (waiting != null) for (AnchorApiClient.ResultCallback<AnchorModels.MemberProgress> listener : waiting) listener.complete(result);
+		});
+	}
+
 	private volatile AnchorModels.Profile profile;
 	private volatile AnchorModels.Leaderboards leaderboards;
 	private volatile String leaderboardMessage = "Rankings have not loaded yet";

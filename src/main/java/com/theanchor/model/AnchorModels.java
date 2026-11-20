@@ -55,6 +55,30 @@ public final class AnchorModels
 		public int rankOrder;
 	}
 
+	public static final class MemberProgress
+	{
+		public String name;
+		public CombatSummary combatAchievements;
+		public CollectionSummary collectionLog;
+	}
+
+	public static final class CombatSummary
+	{
+		public String capturedAt;
+		public String currentTier;
+		public Integer completedTasks;
+		public Integer totalTasks;
+		public Integer totalPoints;
+		public Integer totalPossiblePoints;
+	}
+
+	public static final class CollectionSummary
+	{
+		public String capturedAt;
+		public Integer obtainedCount;
+		public Integer totalCount;
+	}
+
 	public static final class CompetitionRank
 	{
 		public Integer rank;

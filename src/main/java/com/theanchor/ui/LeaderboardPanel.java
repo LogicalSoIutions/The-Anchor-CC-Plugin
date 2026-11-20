@@ -27,14 +27,23 @@ import net.runelite.client.ui.ColorScheme;
 final class LeaderboardPanel extends JPanel {
 	private static final Color GOLD = AnchorTheme.GOLD;
 	private final AnchorDataService data;
+	private final java.awt.CardLayout cards = new java.awt.CardLayout();
+	private final JPanel listView = new JPanel(new BorderLayout(0, 10));
+	private final MemberProfilePanel memberProfile;
+	private int listScrollPosition;
 	private final JComboBox<String> metric = new JComboBox<>(new String[]{"PvM Points", "Clan Points", "Clan Rank"});
 	private final JTextField search = new JTextField();
 	private final JPanel rows = new JPanel();
 
 	LeaderboardPanel(AnchorDataService data) {
 		this.data = data;
+		memberProfile = new MemberProfilePanel(data, this::showList);
 		AnchorTheme.styleComboBox(metric);
-		setLayout(new BorderLayout(0, 10));
+		setLayout(cards);
+		listView.setOpaque(false);
+		add(listView, "list");
+		add(memberProfile, "member");
+		cards.show(this, "list");
 		setBackground(AnchorTheme.BACKGROUND);
 		setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 0));
 		JPanel controls = new JPanel();
@@ -64,10 +73,10 @@ final class LeaderboardPanel extends JPanel {
 		controls.add(search);
 		controls.add(Box.createVerticalStrut(8));
 
-		add(controls, BorderLayout.NORTH);
+		listView.add(controls, BorderLayout.NORTH);
 		rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
 		rows.setOpaque(false);
-		add(rows, BorderLayout.CENTER);
+		listView.add(rows, BorderLayout.CENTER);
 		metric.addActionListener(e -> refresh());
 		search.getDocument().addDocumentListener(new DocumentListener() {
 			public void insertUpdate(DocumentEvent e) { refresh(); }
@@ -135,6 +144,7 @@ final class LeaderboardPanel extends JPanel {
 					points.setFont(AnchorTheme.font(Font.BOLD, 13f));
 					row.add(points, BorderLayout.EAST);
 				}
+				installProfileLink(row, row, member);
 				rows.add(row);
 				rows.add(Box.createVerticalStrut(2));
 			}
@@ -142,6 +152,57 @@ final class LeaderboardPanel extends JPanel {
 		AnchorTheme.typography(this);
 		revalidate();
 		repaint();
+	}
+
+	private void installProfileLink(Component component, JPanel row, AnchorModels.LeaderboardMember member) {
+		component.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		component.addMouseListener(new java.awt.event.MouseAdapter() {
+			@Override public void mouseClicked(java.awt.event.MouseEvent e) {
+				if (javax.swing.SwingUtilities.isLeftMouseButton(e)) showMember(member);
+			}
+			@Override public void mouseEntered(java.awt.event.MouseEvent e) { row.putClientProperty("hover", Boolean.TRUE); row.repaint(); }
+			@Override public void mouseExited(java.awt.event.MouseEvent e) {
+				if (!row.contains(javax.swing.SwingUtilities.convertPoint(component, e.getPoint(), row))) {
+					row.putClientProperty("hover", Boolean.FALSE); row.repaint();
+				}
+			}
+		});
+		if (component == row) {
+			row.setFocusable(true);
+			row.getAccessibleContext().setAccessibleName("Open " + member.name + " profile");
+			row.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("ENTER"), "profile");
+			row.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("SPACE"), "profile");
+			row.getActionMap().put("profile", new javax.swing.AbstractAction() {
+				@Override public void actionPerformed(java.awt.event.ActionEvent e) { showMember(member); }
+			});
+		}
+		if (component instanceof java.awt.Container)
+			for (Component child : ((java.awt.Container) component).getComponents()) installProfileLink(child, row, member);
+	}
+
+	private void showMember(AnchorModels.LeaderboardMember member) {
+		if (memberProfile.isVisible()) return;
+		javax.swing.JScrollPane scroll = (javax.swing.JScrollPane) javax.swing.SwingUtilities.getAncestorOfClass(javax.swing.JScrollPane.class, this);
+		if (scroll != null) listScrollPosition = scroll.getVerticalScrollBar().getValue();
+		cards.show(this, "member");
+		memberProfile.open(member);
+		revalidate();
+		if (scroll != null) javax.swing.SwingUtilities.invokeLater(() -> scroll.getVerticalScrollBar().setValue(0));
+	}
+
+	private void showList() {
+		cards.show(this, "list");
+		revalidate();
+		javax.swing.JScrollPane scroll = (javax.swing.JScrollPane) javax.swing.SwingUtilities.getAncestorOfClass(javax.swing.JScrollPane.class, this);
+		if (scroll != null) javax.swing.SwingUtilities.invokeLater(() -> scroll.getVerticalScrollBar().setValue(listScrollPosition));
+	}
+
+	@Override public Dimension getPreferredSize() {
+		Component active = memberProfile != null && memberProfile.isVisible() ? memberProfile : listView;
+		if (active == null) return super.getPreferredSize();
+		Dimension size = active.getPreferredSize();
+		java.awt.Insets insets = getInsets();
+		return new Dimension(size.width + insets.left + insets.right, size.height + insets.top + insets.bottom);
 	}
 
 	private void addNotice(String message) {

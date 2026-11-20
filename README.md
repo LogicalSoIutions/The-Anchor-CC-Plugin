@@ -6,6 +6,7 @@ RuneLite Plugin Hub project for The Anchor clan.
 
 - Reval-inspired clan panel with profile and ROTM/BOTW/SOTW competitions, leaderboards, PvM Diary, local submissions, and settings tabs.
 - PvM and Clan leaderboards backed by the website cache, with member search and personal standings.
+- Click a leaderboard member for a mini profile with clan standings, Combat Achievement progress, collection-log totals, and sync timestamps. Member progress loads on demand and is cached for five minutes; returning preserves your search, sorting, and scroll position.
 - PvM Diary categories and tier requirements open inside the sidebar with back navigation.
 - Event alerts delivered to game chat with an optional in-game overlay.
 - Evidence screenshots always include the player's RSN, even when chat is closed. Enable **Bingo Overlay → Screenshot only** to include active Bingo details only in captured evidence; leave it off to keep the normal in-game Bingo overlay.
@@ -38,6 +39,8 @@ Archive roster decoding follows live cache scripts 10034/10039/10042: nonzero me
 Run `gradlew.bat clean build` to compile and package the plugin, or `gradlew.bat run` to launch RuneLite in developer mode. The development launcher lives in `src/dev`; there is no automated test suite.
 
 The production API origin is `https://the-anchor.cc`. During development, enable RuneLite's hidden settings and change the plugin API base URL.
+
+Leaderboard member cards use `GET /api/clan/progress?summary=true&name=<RSN>`. Deploy the paired website summary support to return only saved CA/count totals instead of the full progress catalogue.
 
 The exact request and response shapes expected by the plugin are documented in [docs/api-contract.md](docs/api-contract.md).
 

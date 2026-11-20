@@ -91,6 +91,11 @@ public class AnchorApiClient
 		get("/api/clan/profile?name=" + encode(name), false, AnchorModels.Profile.class, callback);
 	}
 
+	public void getMemberProgress(String name, ResultCallback<AnchorModels.MemberProgress> callback)
+	{
+		get("/api/clan/progress?summary=true&name=" + encode(name), false, AnchorModels.MemberProgress.class, callback);
+	}
+
 	public void getLeaderboards(ResultCallback<AnchorModels.Leaderboards> callback)
 	{
 		get("/api/clan/leaderboards", false, AnchorModels.Leaderboards.class, callback);
