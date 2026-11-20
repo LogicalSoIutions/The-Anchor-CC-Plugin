@@ -52,7 +52,7 @@ public class AnchorDataService
 	{
 		if (leaderboardsLoading) return;
 		leaderboardsLoading = true;
-		leaderboardMessage = "Loading clan rankings…";
+		if (leaderboards == null) leaderboardMessage = "Loading clan rankings…";
 		notifyListeners();
 		api.getLeaderboards(result -> {
 			synchronized (this) { leaderboardsLoading = false; }
@@ -60,7 +60,7 @@ public class AnchorDataService
 				leaderboards = result.value;
 				leaderboardMessage = "";
 			} else {
-				leaderboardMessage = leaderboards == null ? "Rankings are currently unavailable. Try refreshing."
+				leaderboardMessage = leaderboards == null ? "Rankings are currently unavailable. Refresh will retry automatically."
 					: "Refresh failed. Showing previously loaded rankings.";
 			}
 			notifyListeners();

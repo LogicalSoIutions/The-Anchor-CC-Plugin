@@ -278,8 +278,12 @@ public class AnchorPlugin extends Plugin
 	}
 	private void runScheduledRefresh()
 	{
-		try { refreshCurrentPlayer(); }
-		catch (RuntimeException e) { log.error("Unable to refresh Anchor profile and competitions", e); }
+		try
+		{
+			refreshCurrentPlayer();
+			data.refreshLeaderboards();
+		}
+		catch (RuntimeException e) { log.error("Unable to refresh Anchor data", e); }
 	}
 	private void runScheduledProgressSync()
 	{
