@@ -31,8 +31,6 @@ final class LeaderboardPanel extends JPanel {
 	private final JComboBox<String> metric = new JComboBox<>(new String[]{"PvM Points", "Clan Points", "Clan Rank"});
 	private final JTextField search = new JTextField();
 	private final JPanel rows = new JPanel();
-	private final JLabel summary = new JLabel();
-	private final JLabel updated = new JLabel();
 
 	LeaderboardPanel(AnchorDataService data) {
 		this.data = data;
@@ -76,11 +74,6 @@ final class LeaderboardPanel extends JPanel {
 		controls.add(search);
 		controls.add(Box.createVerticalStrut(8));
 
-		summary.setForeground(Color.LIGHT_GRAY);
-		controls.add(summary);
-		updated.setForeground(new Color(150, 154, 159));
-		updated.setFont(updated.getFont().deriveFont(10f));
-		controls.add(updated);
 		add(controls, BorderLayout.NORTH);
 		rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
 		rows.setOpaque(false);
@@ -98,9 +91,7 @@ final class LeaderboardPanel extends JPanel {
 		rows.removeAll();
 		AnchorModels.Leaderboards board = data.leaderboards();
 		String message = data.leaderboardMessage();
-		updated.setText("");
 		if (board == null) {
-			summary.setText("Clan standings");
 			addNotice(message);
 		} else {
 			List<AnchorModels.LeaderboardMember> members = new ArrayList<>();
@@ -113,14 +104,6 @@ final class LeaderboardPanel extends JPanel {
 					? Comparator.comparingInt((AnchorModels.LeaderboardMember m) -> m.rankOrder).reversed()
 					: Comparator.comparingInt(m -> position(mode == 0 ? m.pvmRank : m.clanRank));
 			members.sort(order.thenComparing(m -> m.name, String.CASE_INSENSITIVE_ORDER));
-			summary.setText(members.size() + " members" + (query.isEmpty() ? "" : " matching search"));
-			if (board.updatedAt != null) {
-				try {
-					java.time.Instant instant = java.time.Instant.parse(board.updatedAt);
-					updated.setText("Sheet cache · " + java.time.format.DateTimeFormatter.ofPattern("MMM d, HH:mm z")
-							.withZone(java.time.ZoneId.systemDefault()).format(instant));
-				} catch (java.time.format.DateTimeParseException ignored) { updated.setText("Sheet cache timestamp unavailable"); }
-			}
 			if (message != null && !message.isEmpty()) addNotice(message);
 			if (members.isEmpty()) addNotice("No members found.");
 			AnchorModels.Profile profile = data.profile();
