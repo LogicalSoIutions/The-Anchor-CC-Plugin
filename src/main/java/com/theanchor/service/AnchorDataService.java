@@ -6,6 +6,7 @@ import com.theanchor.model.AnchorModels;
 import java.awt.image.BufferedImage;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import javax.inject.Inject;
@@ -64,6 +65,22 @@ public class AnchorDataService
 				waiting = memberProgressRequests.remove(key);
 			}
 			if (waiting != null) for (AnchorApiClient.ResultCallback<AnchorModels.MemberProgress> listener : waiting) listener.complete(result);
+		});
+	}
+
+	/** PvM Diary progress belongs to the linked Discord member and is shared across their accounts. */
+	public void loadMemberDiary(List<String> names, AnchorApiClient.ResultCallback<AnchorModels.PvmDiaryStatus> callback) {
+		loadMemberDiary(names.stream().filter(name -> name.matches("[A-Za-z0-9 _-]{1,12}")).iterator(), callback);
+	}
+
+	private void loadMemberDiary(Iterator<String> names, AnchorApiClient.ResultCallback<AnchorModels.PvmDiaryStatus> callback) {
+		if (!names.hasNext()) {
+			callback.complete(AnchorApiClient.ApiResult.error(404, "No linked PvM Diary profile"));
+			return;
+		}
+		api.getPvmDiaryStatus(names.next(), result -> {
+			if (result.statusCode == 404 && names.hasNext()) loadMemberDiary(names, callback);
+			else callback.complete(result);
 		});
 	}
 

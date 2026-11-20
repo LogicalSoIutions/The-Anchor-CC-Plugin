@@ -613,11 +613,20 @@ public class AnchorPanel extends PluginPanel {
 		page.add(Box.createVerticalStrut(18));
 		page.add(label("Activities", true));
 		page.add(Box.createVerticalStrut(8));
-		if (diary.categories != null) for (AnchorModels.PvmDiaryCategory category : diary.categories) {
-			page.add(diaryCategoryRow(category));
+		addDiaryCategories(page, diary, this::showDiaryCategoryDetails);
+		return page;
+	}
+
+	static void addDiaryCategories(JPanel page, AnchorModels.PvmDiaryStatus diary,
+			java.util.function.Consumer<AnchorModels.PvmDiaryCategory> openCategory) {
+		if (diary.categories == null || diary.categories.isEmpty()) {
+			page.add(wrappedMuted("No diary activities are available yet."));
+			return;
+		}
+		for (AnchorModels.PvmDiaryCategory category : diary.categories) {
+			page.add(diaryCategoryRow(category, () -> openCategory.accept(category)));
 			page.add(Box.createVerticalStrut(6));
 		}
-		return page;
 	}
 
 	private static JPanel diarySummary(AnchorModels.PvmDiaryStatus diary) {
@@ -644,7 +653,7 @@ public class AnchorPanel extends PluginPanel {
 		return metric;
 	}
 
-	private JPanel diaryCategoryRow(AnchorModels.PvmDiaryCategory category) {
+	private static JPanel diaryCategoryRow(AnchorModels.PvmDiaryCategory category, Runnable open) {
 		JPanel row = AnchorTheme.surface(PVM_ACCENT);
 		row.setBorder(BorderFactory.createEmptyBorder(14, 14, 14, 14));
 		JPanel titleRow = new JPanel(new BorderLayout());
@@ -673,7 +682,7 @@ public class AnchorPanel extends PluginPanel {
 		row.add(AnchorTheme.bar(category.earnedPoints, category.totalPoints, GOLD));
 		row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		MouseAdapter click = new MouseAdapter() {
-			@Override public void mouseClicked(MouseEvent e) { showDiaryCategoryDetails(category); }
+			@Override public void mouseClicked(MouseEvent e) { open.run(); }
 		};
 		installClick(row, click);
 		row.addMouseListener(new MouseAdapter() {
@@ -688,7 +697,7 @@ public class AnchorPanel extends PluginPanel {
 		row.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("ENTER"), "details");
 		row.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("SPACE"), "details");
 		row.getActionMap().put("details", new javax.swing.AbstractAction() {
-			@Override public void actionPerformed(java.awt.event.ActionEvent e) { showDiaryCategoryDetails(category); }
+			@Override public void actionPerformed(java.awt.event.ActionEvent e) { open.run(); }
 		});
 		row.getAccessibleContext().setAccessibleName(value(category.name) + ", " + category.completedTiers + " of " + category.totalTiers + " tiers. Open details.");
 		return row;
@@ -751,30 +760,35 @@ public class AnchorPanel extends PluginPanel {
 			});
 			diaryPage.add(Box.createVerticalStrut(6));
 			diaryPage.add(back);
-			diaryPage.add(pageHeading(diaryDisplayName(value(selected.name)), ""));
-			JPanel summary = card();
-			summary.add(label(selected.completedTiers + " / " + selected.totalTiers + " tiers completed", true));
-			summary.add(Box.createVerticalStrut(4));
-			summary.add(muted(number(selected.earnedPoints) + " / " + number(selected.totalPoints) + " PvM points"));
-			summary.add(Box.createVerticalStrut(8));
-			summary.add(AnchorTheme.bar(selected.earnedPoints, selected.totalPoints, GOLD));
-			diaryPage.add(summary);
-			diaryPage.add(Box.createVerticalStrut(8));
-			boolean found = false;
-			if (diary.activities != null) for (AnchorModels.PvmDiaryActivity activity : diary.activities) {
-				if (!java.util.Objects.equals(selected.name, activity.category)) continue;
-				diaryPage.add(diaryActivityDetails(activity));
-				diaryPage.add(Box.createVerticalStrut(6));
-				found = true;
-			}
-			if (!found) diaryPage.add(wrappedMuted("No activity details are available yet."));
+			addDiaryCategoryDetails(diaryPage, diary, selected, true);
 		}
 		AnchorTheme.typography(diaryPage);
 		diaryPage.revalidate();
 		diaryPage.repaint();
 	}
 
-	private static JPanel diaryActivityDetails(AnchorModels.PvmDiaryActivity activity) {
+	static void addDiaryCategoryDetails(JPanel page, AnchorModels.PvmDiaryStatus diary,
+			AnchorModels.PvmDiaryCategory selected, boolean showPending) {
+		page.add(pageHeading(diaryDisplayName(value(selected.name)), ""));
+		JPanel summary = card();
+		summary.add(label(selected.completedTiers + " / " + selected.totalTiers + " tiers completed", true));
+		summary.add(Box.createVerticalStrut(4));
+		summary.add(muted(number(selected.earnedPoints) + " / " + number(selected.totalPoints) + " PvM points"));
+		summary.add(Box.createVerticalStrut(8));
+		summary.add(AnchorTheme.bar(selected.earnedPoints, selected.totalPoints, GOLD));
+		page.add(summary);
+		page.add(Box.createVerticalStrut(8));
+		boolean found = false;
+		if (diary.activities != null) for (AnchorModels.PvmDiaryActivity activity : diary.activities) {
+			if (!java.util.Objects.equals(selected.name, activity.category)) continue;
+			page.add(diaryActivityDetails(activity, showPending));
+			page.add(Box.createVerticalStrut(6));
+			found = true;
+		}
+		if (!found) page.add(wrappedMuted("No activity details are available yet."));
+	}
+
+	private static JPanel diaryActivityDetails(AnchorModels.PvmDiaryActivity activity, boolean showPending) {
 		JPanel card = card();
 		JLabel name = wrappedMuted(diaryDisplayName(value(activity.name)));
 		name.setForeground(AnchorTheme.TEXT);
@@ -787,7 +801,7 @@ public class AnchorPanel extends PluginPanel {
 			card.add(Box.createVerticalStrut(6));
 			card.add(diaryTierRow(tier));
 		}
-		if (activity.pendingCount > 0) {
+		if (showPending && activity.pendingCount > 0) {
 			card.add(Box.createVerticalStrut(6));
 			card.add(wrappedMuted(activity.pendingCount + " submission" + (activity.pendingCount == 1 ? "" : "s") + " pending review"));
 		}

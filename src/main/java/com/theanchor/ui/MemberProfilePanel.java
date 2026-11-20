@@ -10,18 +10,22 @@ import java.awt.Font;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 
 /** On-demand public member card. It never changes the logged-in player's profile. */
 final class MemberProfilePanel extends JPanel {
 	private final AnchorDataService data;
-	private final JPanel content = new JPanel();
-	private AnchorModels.LeaderboardMember member;
+	private final JPanel content = section();
+	private final JPanel diaryDetails = section();
 	private long requestGeneration;
 
 	MemberProfilePanel(AnchorDataService data, Runnable back) {
@@ -34,45 +38,157 @@ final class MemberProfilePanel extends JPanel {
 		backButton.addActionListener(e -> { requestGeneration++; back.run(); });
 		add(backButton);
 		add(Box.createVerticalStrut(8));
-		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-		content.setOpaque(false);
-		content.setAlignmentX(Component.LEFT_ALIGNMENT);
 		add(content);
+		add(diaryDetails);
 	}
 
 	void open(AnchorModels.LeaderboardMember selected) {
-		member = selected;
 		long generation = ++requestGeneration;
 		content.removeAll();
-		addIdentity();
-		JPanel loading = AnchorTheme.surface();
-		loading.add(text("Loading player progress…", false, AnchorTheme.MUTED));
-		content.add(loading);
+		closeDiary();
+		addIdentity(selected);
+		List<String> names = Arrays.stream(selected.name.split("[/|]"))
+			.map(String::trim).filter(name -> !name.isEmpty()).distinct().collect(Collectors.toList());
+		JPanel diary = section();
+		content.add(diary);
+		loadDiary(diary, names, generation, selected.name);
+		for (String name : names) {
+			content.add(Box.createVerticalStrut(6));
+			JPanel account = section();
+			content.add(account);
+			if (names.size() > 1) {
+				account.add(text(name, true, AnchorTheme.TEXT));
+				account.add(Box.createVerticalStrut(6));
+			}
+			JPanel progress = section();
+			account.add(progress);
+			loadProgress(progress, name, generation);
+		}
 		finishLayout();
-		data.loadMemberProgress(selected.name, result -> SwingUtilities.invokeLater(() -> {
+	}
+
+	private void loadProgress(JPanel progress, String name, long generation) {
+		progress.removeAll();
+		progress.add(messageCard("Loading player progress…"));
+		data.loadMemberProgress(name, result -> SwingUtilities.invokeLater(() -> {
 			if (generation != requestGeneration) return;
-			content.removeAll();
-			addIdentity();
+			progress.removeAll();
 			if (!result.isSuccessful() || result.value == null) {
-				JPanel error = AnchorTheme.surface();
-				error.add(text("Unable to load player progress.", false, AnchorTheme.MUTED));
-				error.add(Box.createVerticalStrut(8));
-				JButton retry = AnchorPanel.actionButton("Retry", false);
-				retry.setAlignmentX(Component.LEFT_ALIGNMENT);
-				retry.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-				retry.addActionListener(e -> open(member));
-				error.add(retry);
-				content.add(error);
+				progress.add(retryCard("Unable to load player progress.", () -> {
+					loadProgress(progress, name, generation);
+					finishLayout();
+				}));
 			} else {
-				content.add(combatCard(result.value.combatAchievements));
-				content.add(Box.createVerticalStrut(6));
-				content.add(collectionCard(result.value.collectionLog));
+				progress.add(combatCard(result.value.combatAchievements));
+				progress.add(Box.createVerticalStrut(6));
+				progress.add(collectionCard(result.value.collectionLog));
 			}
 			finishLayout();
 		}));
 	}
 
-	private void addIdentity() {
+	private void loadDiary(JPanel diary, List<String> names, long generation, String memberName) {
+		diary.removeAll();
+		diary.add(messageCard("Loading PvM Diary…"));
+		data.loadMemberDiary(names, result -> SwingUtilities.invokeLater(() -> {
+			if (generation != requestGeneration) return;
+			diary.removeAll();
+			if (result.isSuccessful() && result.value != null) {
+				diary.add(diaryCard(result.value, () -> showDiary(memberName, result.value)));
+			} else if (result.statusCode == 404) {
+				diary.add(messageCard("No linked PvM Diary profile."));
+			} else {
+				diary.add(retryCard("Unable to load PvM Diary.", () -> {
+					loadDiary(diary, names, generation, memberName);
+					finishLayout();
+				}));
+			}
+			finishLayout();
+		}));
+	}
+
+	private static JPanel section() {
+		JPanel section = new JPanel();
+		section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+		section.setOpaque(false);
+		section.setAlignmentX(Component.LEFT_ALIGNMENT);
+		return section;
+	}
+
+	private static JPanel messageCard(String message) {
+		JPanel card = AnchorTheme.surface();
+		card.add(text(message, false, AnchorTheme.MUTED));
+		return card;
+	}
+
+	private static JPanel retryCard(String message, Runnable retryAction) {
+		JPanel card = messageCard(message);
+		card.add(Box.createVerticalStrut(8));
+		JButton retry = AnchorPanel.actionButton("Retry", false);
+		retry.setAlignmentX(Component.LEFT_ALIGNMENT);
+		retry.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		retry.addActionListener(e -> retryAction.run());
+		card.add(retry);
+		return card;
+	}
+
+	private static JPanel diaryCard(AnchorModels.PvmDiaryStatus diary, Runnable open) {
+		JPanel card = AnchorTheme.surface();
+		card.add(text("PvM Diary", true, AnchorTheme.TEXT));
+		card.add(Box.createVerticalStrut(8));
+		card.add(pair("Points", number(diary.earnedPoints) + " / " + number(diary.totalPoints), AnchorTheme.GOLD));
+		card.add(pair("Tiers", fraction(diary.completedTiers, diary.totalTiers), AnchorTheme.TEXT));
+		if (diary.totalPoints > 0) {
+			card.add(Box.createVerticalStrut(8));
+			card.add(AnchorTheme.bar(diary.earnedPoints, diary.totalPoints, AnchorTheme.GOLD));
+		}
+		card.add(Box.createVerticalStrut(8));
+		card.add(diaryButton("View PvM Diary", open));
+		return card;
+	}
+
+	private void showDiary(String memberName, AnchorModels.PvmDiaryStatus diary) {
+		content.setVisible(false);
+		diaryDetails.setVisible(true);
+		diaryDetails.removeAll();
+		diaryDetails.add(diaryButton("‹  Member profile", () -> {
+			closeDiary();
+			finishDiaryNavigation();
+		}));
+		diaryDetails.add(Box.createVerticalStrut(8));
+		diaryDetails.add(text(memberName, true, AnchorTheme.TEXT));
+		diaryDetails.add(Box.createVerticalStrut(8));
+		AnchorPanel.addDiaryCategories(diaryDetails, diary, category -> {
+			diaryDetails.removeAll();
+			diaryDetails.add(diaryButton("‹  All activities", () -> showDiary(memberName, diary)));
+			diaryDetails.add(Box.createVerticalStrut(8));
+			AnchorPanel.addDiaryCategoryDetails(diaryDetails, diary, category, false);
+			finishDiaryNavigation();
+		});
+		finishDiaryNavigation();
+	}
+
+	private void closeDiary() {
+		diaryDetails.removeAll();
+		diaryDetails.setVisible(false);
+		content.setVisible(true);
+	}
+
+	private void finishDiaryNavigation() {
+		finishLayout();
+		JScrollPane scroll = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, this);
+		if (scroll != null) scroll.getVerticalScrollBar().setValue(0);
+	}
+
+	private static JButton diaryButton(String label, Runnable action) {
+		JButton button = AnchorPanel.actionButton(label, false);
+		button.setAlignmentX(Component.LEFT_ALIGNMENT);
+		button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		button.addActionListener(e -> action.run());
+		return button;
+	}
+
+	private void addIdentity(AnchorModels.LeaderboardMember member) {
 		JPanel identity = AnchorTheme.surface();
 		identity.add(text(member.name, true, AnchorTheme.TEXT));
 		identity.add(text(member.currentRank == null ? "Rank unavailable" : member.currentRank, false, AnchorTheme.GOLD));
