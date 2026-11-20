@@ -452,42 +452,54 @@ public class AnchorPanel extends PluginPanel {
 
 	private JPanel rankSummary(AnchorModels.Standings standings) {
 		JPanel summary = card();
-		JButton ladder = actionButton("Clan Rank · " + rankName(standings) + "  ›", false);
-		ladder.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
-		ladder.setAlignmentX(Component.LEFT_ALIGNMENT);
-		ladder.addActionListener(e -> {
-			rebuildRankLadder(standings);
-			switchTab("Rank Ladder");
-			SwingUtilities.invokeLater(() -> {
-				rankScroll.getVerticalScrollBar().setValue(0);
-				if (currentRankRow != null) currentRankRow.scrollRectToVisible(new java.awt.Rectangle(0, 0, currentRankRow.getWidth(), currentRankRow.getHeight()));
-			});
-		});
-		summary.add(ladder);
-		summary.add(Box.createVerticalStrut(8));
-		JPanel balances = new JPanel(new GridLayout(1, 2, 4, 0));
-		balances.setOpaque(false);
-		balances.setAlignmentX(Component.LEFT_ALIGNMENT);
-		JButton diary = actionButton(number(standings.pvmPoints) + " PvM ›", false);
-		diary.getAccessibleContext().setAccessibleName("PvM Points, open Diary");
-		diary.addActionListener(e -> switchTab("PvM Diary"));
-		balances.add(diary);
-		JButton clan = actionButton(number(standings.clanPoints) + " Clan ›", false);
-		clan.addActionListener(e -> ladder.doClick());
-		clan.setToolTipText("Clan Points · " + rank(standings.clanRank));
-		diary.setToolTipText("PvM Points · " + rank(standings.pvmRank));
-		balances.add(clan);
-		summary.add(balances);
 		AnchorModels.NextRank next = standings.nextRank;
-		if (next != null && next.name != null) {
-			summary.add(Box.createVerticalStrut(8));
-			summary.add(label("Next · " + next.name, true));
-			addRankProgress(summary, "PvM Points", standings.pvmPoints, next.pvmPoints, next.pvmPointsRemaining, PVM_ACCENT);
-			addRankProgress(summary, "Clan Points", standings.clanPoints, next.clanPoints, next.clanPointsRemaining, CLAN_ACCENT);
-			if (next.additionalRequirement != null && !next.additionalRequirement.isBlank())
-				summary.add(wrappedMuted(next.additionalRequirement));
-		}
+		boolean hasNext = next != null && next.name != null;
+		if (hasNext) summary.add(label("Next · " + next.name, true));
+		addLinkedRankProgress(summary, "PvM Points", standings.pvmPoints,
+				hasNext ? next.pvmPoints : null, hasNext ? next.pvmPointsRemaining : 0, PVM_ACCENT, hasNext, standings);
+		addLinkedRankProgress(summary, "Clan Points", standings.clanPoints,
+				hasNext ? next.clanPoints : null, hasNext ? next.clanPointsRemaining : 0, CLAN_ACCENT, hasNext, standings);
+		if (hasNext && next.additionalRequirement != null && !next.additionalRequirement.isBlank())
+			summary.add(wrappedMuted(next.additionalRequirement));
 		return summary;
+	}
+
+	private void addLinkedRankProgress(JPanel summary, String name, long points, Long target,
+			long remaining, Color accent, boolean hasNext, AnchorModels.Standings standings) {
+		summary.add(Box.createVerticalStrut(8));
+		long required = target == null ? points + remaining : target;
+		JPanel labels = new JPanel(new BorderLayout());
+		labels.setOpaque(false);
+		labels.setAlignmentX(Component.LEFT_ALIGNMENT);
+		labels.add(muted(name), BorderLayout.WEST);
+
+		String amount = number(points) + (hasNext ? " / " + number(required) : "");
+		JButton link = new JButton("<html><u>" + amount + "</u></html>");
+		link.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 0));
+		link.setContentAreaFilled(false);
+		link.setForeground(accent);
+		link.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+		link.setToolTipText("View Rank Ladder");
+		link.getAccessibleContext().setAccessibleName(name + ": " + amount + ", view Rank Ladder");
+		link.addActionListener(e -> openRankLadder(standings));
+		labels.add(link, BorderLayout.EAST);
+		summary.add(labels);
+		if (hasNext) {
+			summary.add(Box.createVerticalStrut(7));
+			summary.add(AnchorTheme.bar(points, required, accent));
+			summary.add(Box.createVerticalStrut(5));
+			summary.add(muted(remaining > 0 ? number(remaining) + " to go" : "Requirement met"));
+		}
+	}
+
+	private void openRankLadder(AnchorModels.Standings standings) {
+		rebuildRankLadder(standings);
+		switchTab("Rank Ladder");
+		SwingUtilities.invokeLater(() -> {
+			rankScroll.getVerticalScrollBar().setValue(0);
+			if (currentRankRow != null)
+				currentRankRow.scrollRectToVisible(new java.awt.Rectangle(0, 0, currentRankRow.getWidth(), currentRankRow.getHeight()));
+		});
 	}
 
 	// The profile API supplies only the next tier. Use the published thresholds for the other rows.
