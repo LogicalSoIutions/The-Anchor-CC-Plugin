@@ -31,7 +31,9 @@ dependencies {
 }
 
 group = 'com.theanchor'
-version = '1.1.1'
+def pluginProperties = new Properties()
+file('runelite-plugin.properties').withInputStream { pluginProperties.load(it) }
+version = pluginProperties.getProperty('version')
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
