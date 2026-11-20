@@ -112,6 +112,9 @@ public class AnchorPanel extends PluginPanel {
 	private final JPanel contentPanel = new JPanel(contentCards);
 	private final JPanel competitionsPage = verticalPanel();
 	private final JPanel diaryPage = verticalPanel();
+	private final JPanel rankPage = verticalPanel();
+	private JScrollPane rankScroll;
+	private JPanel currentRankRow;
 	private JScrollPane diaryScroll;
 	private final LeaderboardPanel leaderboardsPage;
 	private final java.util.Map<String, JButton> navigationTabs = new java.util.LinkedHashMap<>();
@@ -209,6 +212,8 @@ public class AnchorPanel extends PluginPanel {
 		contentPanel.add(scroll(home, true), "Profile");
 		diaryScroll = scroll(diaryPage, true);
 		contentPanel.add(diaryScroll, "PvM Diary");
+		rankScroll = scroll(rankPage, true);
+		contentPanel.add(rankScroll, "Rank Ladder");
 		contentPanel.add(scroll(leaderboardsPage, true), "Leaderboards");
 		contentPanel.add(scroll(submissions, true), "Submissions");
 		buildSettingsPage();
@@ -394,37 +399,10 @@ public class AnchorPanel extends PluginPanel {
 			profileCard.add(memberHeader);
 			home.add(profileCard);
 			home.add(Box.createVerticalStrut(8));
-			JPanel points = new JPanel(new GridLayout(1, 2, 4, 0));
-			points.setOpaque(false);
-			points.setAlignmentX(Component.LEFT_ALIGNMENT);
-			points.setMaximumSize(new Dimension(Integer.MAX_VALUE, 72));
-			points.add(pointSummary("PvM Points", s.pvmPoints, s.pvmRank, GOLD));
-			points.add(pointSummary("Clan Points", s.clanPoints, s.clanRank, CLAN_ACCENT));
-			home.add(points);
+			home.add(rankSummary(s));
 			home.add(Box.createVerticalStrut(6));
-			if (s.nextRank != null) {
-				JPanel rankProgress = card();
-				rankProgress.add(muted("NEXT RANK"));
-				JLabel target = label(value(s.nextRank.name), true);
-				target.setForeground(GOLD);
-				rankProgress.add(target);
-				rankProgress.add(Box.createVerticalStrut(10));
-				rankProgress.add(progress("PvM", s.pvmPoints, s.nextRank.pvmPointsRemaining, PVM_ACCENT));
-				rankProgress.add(Box.createVerticalStrut(10));
-				rankProgress.add(progress("Clan", s.clanPoints, s.nextRank.clanPointsRemaining, CLAN_ACCENT));
-				rankProgress.add(Box.createVerticalStrut(8));
-				String remaining = s.nextRank.pvmPointsRemaining == 0 && s.nextRank.clanPointsRemaining == 0
-						? "Point requirements met"
-						: number(s.nextRank.pvmPointsRemaining) + " PvM · " + number(s.nextRank.clanPointsRemaining) + " Clan to go";
-				rankProgress.add(muted(remaining));
-				if (s.nextRank.additionalRequirement != null && !s.nextRank.additionalRequirement.isBlank()) {
-					rankProgress.add(Box.createVerticalStrut(8));
-					rankProgress.add(wrappedMuted(s.nextRank.additionalRequirement));
-				}
-				home.add(rankProgress);
-				home.add(Box.createVerticalStrut(6));
-			}
 		}
+		if ("Rank Ladder".equals(activeTab)) rebuildRankLadder(profile == null ? null : profile.standings);
 		if (profile == null || profile.standings == null) {
 			JPanel empty = card();
 			empty.add(wrappedMuted(data.message()));
@@ -470,6 +448,134 @@ public class AnchorPanel extends PluginPanel {
 		competitionsPage.repaint();
 		diaryPage.revalidate();
 		diaryPage.repaint();
+	}
+
+	private JPanel rankSummary(AnchorModels.Standings standings) {
+		JPanel summary = card();
+		JButton ladder = actionButton("Clan Rank · " + rankName(standings) + "  ›", false);
+		ladder.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+		ladder.setAlignmentX(Component.LEFT_ALIGNMENT);
+		ladder.addActionListener(e -> {
+			rebuildRankLadder(standings);
+			switchTab("Rank Ladder");
+			SwingUtilities.invokeLater(() -> {
+				rankScroll.getVerticalScrollBar().setValue(0);
+				if (currentRankRow != null) currentRankRow.scrollRectToVisible(new java.awt.Rectangle(0, 0, currentRankRow.getWidth(), currentRankRow.getHeight()));
+			});
+		});
+		summary.add(ladder);
+		summary.add(Box.createVerticalStrut(8));
+		JPanel balances = new JPanel(new GridLayout(1, 2, 4, 0));
+		balances.setOpaque(false);
+		balances.setAlignmentX(Component.LEFT_ALIGNMENT);
+		JButton diary = actionButton(number(standings.pvmPoints) + " PvM ›", false);
+		diary.getAccessibleContext().setAccessibleName("PvM Points, open Diary");
+		diary.addActionListener(e -> switchTab("PvM Diary"));
+		balances.add(diary);
+		JButton clan = actionButton(number(standings.clanPoints) + " Clan ›", false);
+		clan.addActionListener(e -> ladder.doClick());
+		clan.setToolTipText("Clan Points · " + rank(standings.clanRank));
+		diary.setToolTipText("PvM Points · " + rank(standings.pvmRank));
+		balances.add(clan);
+		summary.add(balances);
+		AnchorModels.NextRank next = standings.nextRank;
+		if (next != null && next.name != null) {
+			summary.add(Box.createVerticalStrut(8));
+			summary.add(label("Next · " + next.name, true));
+			addRankProgress(summary, "PvM Points", standings.pvmPoints, next.pvmPoints, next.pvmPointsRemaining, PVM_ACCENT);
+			addRankProgress(summary, "Clan Points", standings.clanPoints, next.clanPoints, next.clanPointsRemaining, CLAN_ACCENT);
+			if (next.additionalRequirement != null && !next.additionalRequirement.isBlank())
+				summary.add(wrappedMuted(next.additionalRequirement));
+		}
+		return summary;
+	}
+
+	// The profile API supplies only the next tier. Use the published thresholds for the other rows.
+	private static final List<RankTier> RANK_TIERS = List.of(
+			new RankTier("Zealot", 150, 50, null),
+			new RankTier("Saradominist", 400, 100, null),
+			new RankTier("Guthixian", 800, 200, null),
+			new RankTier("Zamorakian", 1200, 300, null),
+			new RankTier("Serenist", 1800, 400, null),
+			new RankTier("Bandosian", 2600, 500, null),
+			new RankTier("Zarosian", 3500, 600, null),
+			new RankTier("Armadylean", 5000, 750, null),
+			new RankTier("Xerician", 7500, 1000, null),
+			new RankTier("TzTok", 8000, 1100, "All Master Combat Achievements achieved."),
+			new RankTier("TzKal", 9000, 1300, "All Grandmaster Combat Achievements achieved."),
+			new RankTier("Maxed", 10000, 1500, "All Grandmaster Combat Achievements achieved and 2277 total level."));
+
+	private String expandedRank;
+
+	private void rebuildRankLadder(AnchorModels.Standings standings) {
+		rankPage.removeAll();
+		currentRankRow = null;
+		JButton back = actionButton("‹ Home", false);
+		back.addActionListener(e -> switchTab("Profile"));
+		rankPage.add(back);
+		rankPage.add(pageHeading("Rank Ladder", standings == null ? "" : "Current rank · " + rankName(standings)));
+		for (RankTier tier : RANK_TIERS) {
+			AnchorModels.NextRank next = standings == null ? null : standings.nextRank;
+			boolean upcoming = next != null && tier.name.equalsIgnoreCase(next.name);
+			boolean current = standings != null && tier.name.equalsIgnoreCase(standings.currentRank);
+			long pvmTarget = upcoming && next.pvmPoints != null ? next.pvmPoints : tier.pvm;
+			long clanTarget = upcoming && next.clanPoints != null ? next.clanPoints : tier.clan;
+			String extra = upcoming ? next.additionalRequirement : tier.extra;
+			JPanel row = card();
+			boolean expanded = tier.name.equals(expandedRank);
+			JButton toggle = actionButton(tier.name + (current ? " · Current" : upcoming ? " · Next" : "")
+					+ (expanded ? "  ▾" : "  ›"), current || upcoming);
+			toggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+			toggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+			toggle.addActionListener(e -> {
+				expandedRank = tier.name.equals(expandedRank) ? null : tier.name;
+				int scrollPosition = rankScroll.getVerticalScrollBar().getValue();
+				rebuildRankLadder(standings);
+				SwingUtilities.invokeLater(() -> rankScroll.getVerticalScrollBar().setValue(scrollPosition));
+			});
+			row.add(toggle);
+			row.add(wrappedMuted(number(pvmTarget) + " PvM · " + number(clanTarget) + " Clan"));
+			if (expanded) {
+				if (standings != null) {
+					addRankProgress(row, "PvM Points", standings.pvmPoints, pvmTarget,
+							upcoming ? next.pvmPointsRemaining : Math.max(0, pvmTarget - standings.pvmPoints), PVM_ACCENT);
+					addRankProgress(row, "Clan Points", standings.clanPoints, clanTarget,
+							upcoming ? next.clanPointsRemaining : Math.max(0, clanTarget - standings.clanPoints), CLAN_ACCENT);
+				}
+				if (extra != null && !extra.isBlank()) row.add(wrappedMuted(extra));
+			}
+			if (current) currentRankRow = row;
+			rankPage.add(row);
+			rankPage.add(Box.createVerticalStrut(6));
+		}
+		AnchorTheme.typography(rankPage);
+		rankPage.revalidate();
+		rankPage.repaint();
+	}
+
+	private static String rankName(AnchorModels.Standings standings) {
+		return standings.currentRank == null || standings.currentRank.isBlank() ? "Unranked" : standings.currentRank;
+	}
+
+	private static void addRankProgress(JPanel panel, String name, long current, Long target, long remaining, Color accent) {
+		panel.add(Box.createVerticalStrut(8));
+		long required = target == null ? Math.max(0, current + remaining) : target;
+		long credited = Math.max(0, Math.min(current, required));
+		panel.add(progress(name, credited, required - credited, accent, true));
+	}
+
+	private static final class RankTier {
+		private final String name;
+		private final long pvm;
+		private final long clan;
+		private final String extra;
+
+		private RankTier(String name, long pvm, long clan, String extra) {
+			this.name = name;
+			this.pvm = pvm;
+			this.clan = clan;
+			this.extra = extra;
+		}
 	}
 
 	private JPanel pvmDiary(AnchorModels.PvmDiaryStatus diary) {
@@ -1349,25 +1455,6 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private static JPanel card() { return AnchorTheme.surface(); }
-
-	private static JPanel pointSummary(String title, long points, Integer position, Color accent) {
-		JPanel card = card();
-		card.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-		JLabel amount = new JLabel(number(points));
-		amount.setAlignmentX(Component.CENTER_ALIGNMENT);
-		amount.setFont(AnchorTheme.font(Font.BOLD, 16));
-		amount.setForeground(accent);
-		card.add(amount);
-		JLabel caption = muted(title);
-		caption.setAlignmentX(Component.CENTER_ALIGNMENT);
-		caption.setHorizontalAlignment(SwingConstants.CENTER);
-		card.add(caption);
-		JLabel place = muted(position == null ? "Unranked" : "#" + position + " overall");
-		place.setAlignmentX(Component.CENTER_ALIGNMENT);
-		place.setHorizontalAlignment(SwingConstants.CENTER);
-		card.add(place);
-		return card;
-	}
 
 	static JScrollPane scroll(JPanel panel) {
 		return scroll(panel, false);

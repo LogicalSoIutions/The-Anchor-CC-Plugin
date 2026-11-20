@@ -68,6 +68,8 @@ public final class AnchorModels
 	public static final class NextRank
 	{
 		public String name;
+		public Long pvmPoints;
+		public Long clanPoints;
 		public long pvmPointsRemaining;
 		public long clanPointsRemaining;
 		public String additionalRequirement;
