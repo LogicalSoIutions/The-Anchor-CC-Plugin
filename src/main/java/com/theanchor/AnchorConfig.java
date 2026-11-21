@@ -55,9 +55,9 @@ public interface AnchorConfig extends Config
 	default boolean autoSubmitEnabled() { return true; }
 
 	@ConfigItem(keyName = "animatedBanner", name = "Animated banner",
-		description = "Animate the side-panel banner; disable to show the static Anchor banner",
+		description = "Download and cache the animated banner when enabled; show the static banner while loading",
 		section = APPEARANCE, position = 0)
-	default boolean animatedBanner() { return true; }
+	default boolean animatedBanner() { return false; }
 
 	@ConfigItem(keyName = "eventAlerts", name = "Event Alerts",
 		description = "Receive new event announcements in game chat",

@@ -10,8 +10,6 @@ import com.theanchor.model.AnchorModels;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -20,7 +18,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.inject.Singleton;
+import net.runelite.client.util.Filepath;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.MediaType;
@@ -29,7 +29,6 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
-import net.runelite.client.RuneLite;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,14 +44,15 @@ public class AnchorApiClient
 	private final AnchorConfig config;
 	private final String origin;
 	private final ScheduledExecutorService executor;
-	private final Path requestJournal;
+	private final Filepath requestJournal;
 	private final Object requestJournalLock = new Object();
 
 	@Inject
-	public AnchorApiClient(OkHttpClient http, Gson gson, AnchorConfig config, ScheduledExecutorService executor)
+	public AnchorApiClient(OkHttpClient http, Gson gson, AnchorConfig config, ScheduledExecutorService executor,
+		@Named("anchorDirectory") Filepath directory)
 	{
 		this(http, gson, config, ANCHOR_ORIGIN, executor,
-			RuneLite.RUNELITE_DIR.toPath().resolve("the-anchor").resolve("debug").resolve("api-requests.jsonl"));
+			directory.joinSegment("debug").joinSegment("api-requests.jsonl"));
 	}
 
 	// Visible to package tests only; production requests always use ANCHOR_ORIGIN.
@@ -62,7 +62,7 @@ public class AnchorApiClient
 	}
 
 	AnchorApiClient(OkHttpClient http, Gson gson, AnchorConfig config, String origin,
-		ScheduledExecutorService executor, Path requestJournal)
+		ScheduledExecutorService executor, Filepath requestJournal)
 	{
 		this.http = http.newBuilder().followRedirects(false).followSslRedirects(false).build();
 		this.gson = gson;
@@ -132,7 +132,7 @@ public class AnchorApiClient
 		get("/api/runelite/bingo/rules", true, AnchorModels.BingoRules.class, callback);
 	}
 
-	public void uploadEvent(AnchorModels.EventEnvelope metadata, Path screenshot, String format,
+	public void uploadEvent(AnchorModels.EventEnvelope metadata, Filepath screenshot, String format,
 		ResultCallback<AnchorModels.EventResponse> callback)
 	{
 		try
@@ -145,9 +145,17 @@ public class AnchorApiClient
 			long screenshotBytes = 0;
 			if (screenshot != null)
 			{
-				screenshotBytes = Files.size(screenshot);
+				screenshotBytes = screenshot.size();
 				MediaType imageType = MediaType.parse("image/" + ("jpg".equals(format) ? "jpeg" : format));
-				bodyBuilder.addFormDataPart("screenshot", screenshot.getFileName().toString(), RequestBody.create(imageType, screenshot.toFile()));
+				bodyBuilder.addFormDataPart("screenshot", screenshot.getFileName(), new RequestBody()
+				{
+					@Override public MediaType contentType() { return imageType; }
+					@Override public long contentLength() throws IOException { return screenshot.size(); }
+					@Override public void writeTo(okio.BufferedSink sink) throws IOException
+					{
+						try (okio.Source source = okio.Okio.source(screenshot.openInputStream())) { sink.writeAll(source); }
+					}
+				});
 			}
 			MultipartBody body = bodyBuilder.build();
 			Map<String, Object> journalPayload = new LinkedHashMap<>();
@@ -330,8 +338,8 @@ public class AnchorApiClient
 				{
 					synchronized (requestJournalLock)
 					{
-						Files.createDirectories(requestJournal.getParent());
-						Files.writeString(requestJournal, gson.toJson(entry) + System.lineSeparator(), StandardCharsets.UTF_8,
+						requestJournal.getParent().createDirectories();
+						requestJournal.write(gson.toJson(entry) + System.lineSeparator(),
 							java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
 					}
 				}

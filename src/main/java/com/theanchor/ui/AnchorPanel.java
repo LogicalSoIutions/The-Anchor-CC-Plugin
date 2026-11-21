@@ -11,6 +11,7 @@ import com.theanchor.evidence.EventPipeline;
 import com.theanchor.evidence.EvidenceStore;
 import com.theanchor.model.AnchorModels;
 import com.theanchor.service.AnchorDataService;
+import com.theanchor.service.ImageCache;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
@@ -35,7 +36,6 @@ import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
-import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.time.Duration;
 import java.time.Instant;
@@ -94,6 +94,9 @@ public class AnchorPanel extends PluginPanel {
 	private final ConfigManager configManager;
 	private final SpriteManager spriteManager;
 	private final ItemManager itemManager;
+	private final ImageCache imageCache;
+	private ImageIcon animatedBanner;
+	private boolean bannerLoading;
 	private final Runnable dataListener = this::refreshOnEdt;
 	private final AtomicBoolean refreshQueued = new AtomicBoolean();
 	private boolean submissionsLoading;
@@ -141,7 +144,8 @@ public class AnchorPanel extends PluginPanel {
 
 	@Inject
 	public AnchorPanel(AnchorDataService data, EvidenceStore evidence, EventPipeline pipeline,
-			AnchorConfig config, ConfigManager configManager, SpriteManager spriteManager, ItemManager itemManager) {
+			AnchorConfig config, ConfigManager configManager, SpriteManager spriteManager, ItemManager itemManager,
+			ImageCache imageCache) {
 		super(false);
 		this.data = data;
 		this.evidence = evidence;
@@ -150,6 +154,7 @@ public class AnchorPanel extends PluginPanel {
 		this.configManager = configManager;
 		this.spriteManager = spriteManager;
 		this.itemManager = itemManager;
+		this.imageCache = imageCache;
 		this.leaderboardsPage = new LeaderboardPanel(data);
 		setLayout(new BorderLayout());
 		setBackground(AnchorTheme.BACKGROUND);
@@ -311,15 +316,39 @@ public class AnchorPanel extends PluginPanel {
 
 	public void refreshBanner() {
 		Runnable update = () -> {
-			banner.setIcon(loadBannerIcon(config.animatedBanner()));
-			((AspectRatioIconLabel) banner).refreshAspectRatio();
-			banner.revalidate();
-			banner.repaint();
+			if (!config.animatedBanner()) {
+				setBannerIcon(loadStaticBannerIcon());
+				if (animatedBanner != null) animatedBanner.getImage().flush();
+				animatedBanner = null;
+				return;
+			}
+			setBannerIcon(animatedBanner == null ? loadStaticBannerIcon() : animatedBanner);
+			if (animatedBanner != null || bannerLoading) return;
+			bannerLoading = true;
+			imageCache.loadAnimatedBanner(icon -> SwingUtilities.invokeLater(() -> {
+				bannerLoading = false;
+				if (!config.animatedBanner()) {
+					if (icon != null) icon.getImage().flush();
+					return;
+				}
+				if (icon != null) {
+					animatedBanner = icon;
+					setBannerIcon(icon);
+				}
+			}));
 		};
 		if (SwingUtilities.isEventDispatchThread())
 			update.run();
 		else
 			SwingUtilities.invokeLater(update);
+	}
+
+	private void setBannerIcon(ImageIcon icon) {
+		icon.setImageObserver(banner);
+		banner.setIcon(icon);
+		((AspectRatioIconLabel) banner).refreshAspectRatio();
+		banner.revalidate();
+		banner.repaint();
 	}
 
 	private void refresh() {
@@ -1429,7 +1458,10 @@ public class AnchorPanel extends PluginPanel {
 
 	private void showProof(EvidenceStore.Record record) {
 		try {
-			BufferedImage image = ImageIO.read(Path.of(record.screenshotPath).toFile());
+			BufferedImage image;
+			try (java.io.InputStream input = evidence.screenshot(record).openInputStream()) {
+				image = ImageIO.read(input);
+			}
 			if (image == null)
 				throw new IllegalArgumentException("Unsupported evidence image");
 			Window owner = SwingUtilities.getWindowAncestor(this);
@@ -1944,8 +1976,8 @@ public class AnchorPanel extends PluginPanel {
 		return i;
 	}
 
-	private static ImageIcon loadBannerIcon(boolean animated) {
-		java.net.URL resource = AnchorPanel.class.getResource(animated ? "/anchor_banner.gif" : "/anchor_banner.png");
+	private static ImageIcon loadStaticBannerIcon() {
+		java.net.URL resource = AnchorPanel.class.getResource("/anchor_banner.png");
 		return resource == null ? new ImageIcon(scale(placeholderBanner(), PANEL_WIDTH, 62)) : new ImageIcon(resource);
 	}
 

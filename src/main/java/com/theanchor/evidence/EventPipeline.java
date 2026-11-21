@@ -6,7 +6,6 @@ import com.theanchor.model.AnchorModels;
 import com.theanchor.service.BossRegistry;
 import com.theanchor.service.PartyTracker;
 import com.theanchor.service.RulesService;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -25,6 +24,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
 import net.runelite.api.Player;
+import net.runelite.client.util.Filepath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -210,8 +210,15 @@ public class EventPipeline
 			return;
 		}
 		record.status = AnchorModels.EventStatus.UPLOADING; record.error = null; record.updatedAt = Instant.now().toString(); persist(record);
-		Path screenshot = record.screenshotPath == null || record.screenshotPath.isBlank()
-			? null : Path.of(record.screenshotPath);
+		Filepath screenshot;
+		try { screenshot = store.screenshot(record); }
+		catch (java.io.IOException | IllegalArgumentException e)
+		{
+			record.status = AnchorModels.EventStatus.FAILED;
+			record.error = "Invalid evidence reference";
+			persist(record);
+			return;
+		}
 		executor.execute(() ->
 		{
 			if (!diaryEligible(record)) return;

@@ -40,6 +40,11 @@ tasks.withType(JavaCompile).configureEach {
 	options.release.set(11)
 }
 
+// Keep optional animations out of plugin artifacts, including stale build resources.
+tasks.withType(Jar).configureEach {
+	exclude 'anchor_banner.gif', 'anchor_banner.webp'
+}
+
 tasks.register('run', JavaExec) {
 	classpath = sourceSets.dev.runtimeClasspath
 	mainClass = pluginMainClass

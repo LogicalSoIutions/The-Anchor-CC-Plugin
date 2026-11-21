@@ -9,6 +9,7 @@ RuneLite Plugin Hub project for The Anchor clan.
 - Click a leaderboard member for a mini profile with clan standings, Combat Achievement progress, collection-log totals, and sync timestamps. Member progress loads on demand and is cached for five minutes; returning preserves your search, sorting, and scroll position.
 - PvM Diary categories and tier requirements open inside the sidebar with back navigation.
 - Event alerts delivered to game chat with an optional in-game overlay.
+- Animated banner is off by default. Enabling it downloads `https://the-anchor.cc/banner.gif` once into the local image cache; the static banner stays visible while loading or if the download fails. Later loads use the cached GIF. Only the static PNG is bundled with the plugin.
 - Evidence screenshots always include the player's RSN, even when chat is closed. Enable **Bingo Overlay → Screenshot only** to include active Bingo details only in captured evidence; leave it off to keep the normal in-game Bingo overlay.
 - Automatic full-client evidence capture for eligible loot, collection-log unlocks, pets, Combat Achievement tiers, and PBs.
 - Durable local outbox and editable loot-submission drafts.
@@ -44,7 +45,7 @@ Leaderboard member cards use `GET /api/clan/progress?summary=true&name=<RSN>`. D
 
 The exact request and response shapes expected by the plugin are documented in [docs/api-contract.md](docs/api-contract.md).
 
-Evidence and caches are stored under `.runelite/the-anchor`. Authentication codes are stored only in RuneLite configuration and are never written into evidence metadata or logs.
+Evidence, caches, and the optional API debug journal are stored under `.runelite/plugin-data/the-anchor-cc`. RuneLite automatically migrates the previous `.runelite/the-anchor` directory on first use; existing submission screenshot references remain supported. Authentication codes are stored only in RuneLite configuration and are never written into evidence metadata or logs.
 
 ### UI attribution
 

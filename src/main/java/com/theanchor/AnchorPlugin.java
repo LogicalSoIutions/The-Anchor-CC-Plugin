@@ -31,12 +31,15 @@ import com.theanchor.ui.EventAlertOverlay;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
+import javax.inject.Named;
+import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
@@ -52,11 +55,13 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
-import net.runelite.client.util.ImageUtil;
+import net.runelite.client.util.Filepath;
 
 @Slf4j
 @PluginDescriptor(
 	name = "The Anchor",
+	internalName = "the-anchor-cc",
+	legacyDataDirectory = "the-anchor",
 	description = "The Anchor clan dashboard, evidence capture, loot submissions, and PB sync",
 	tags = {"clan", "loot", "pvm", "personal best", "collection log", "pet"}
 )
@@ -107,6 +112,14 @@ public class AnchorPlugin extends Plugin
 	private final Runnable connectionListener = () -> clientThread.invokeLater(this::updateFeatureActivation);
 
 	@Provides AnchorConfig provideConfig(ConfigManager manager) { return manager.getConfig(AnchorConfig.class); }
+
+	@Provides
+	@Singleton
+	@Named("anchorDirectory")
+	Filepath provideDataDirectory() throws IOException
+	{
+		return getPluginDirectory();
+	}
 
 	@Override protected void startUp()
 	{
@@ -295,11 +308,14 @@ public class AnchorPlugin extends Plugin
 
 	private BufferedImage loadIcon()
 	{
-		try { return ImageUtil.loadImageResource(getClass(), "anchor_icon.png"); }
-		catch (IllegalArgumentException e)
-		{
-			BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB); Graphics2D g = image.createGraphics();
-			g.setColor(new Color(28, 38, 52)); g.fillOval(0, 0, 16, 16); g.setColor(new Color(207, 164, 76)); g.drawLine(8, 2, 8, 13); g.drawArc(3, 7, 10, 7, 180, 180); g.dispose(); return image;
-		}
+		BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = image.createGraphics();
+		g.setColor(new Color(28, 38, 52));
+		g.fillOval(0, 0, 16, 16);
+		g.setColor(new Color(207, 164, 76));
+		g.drawLine(8, 2, 8, 13);
+		g.drawArc(3, 7, 10, 7, 180, 180);
+		g.dispose();
+		return image;
 	}
 }
