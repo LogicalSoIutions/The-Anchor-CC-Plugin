@@ -3,7 +3,6 @@ package com.theanchor.evidence;
 import com.theanchor.AnchorConfig;
 import com.theanchor.api.AnchorApiClient;
 import com.theanchor.model.AnchorModels;
-import com.theanchor.model.CharacterIdentity;
 import com.theanchor.service.BossRegistry;
 import com.theanchor.service.PartyTracker;
 import com.theanchor.service.RulesService;
@@ -24,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
+import net.runelite.api.Player;
 import net.runelite.client.util.Filepath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,11 +35,9 @@ public class EventPipeline
 	private static final long RAID_GROUP_SETTLE_MILLIS = 1_500L;
 	private final EventDeduplicator deduplicator = new EventDeduplicator(8_000L);
 	private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
-	private final Map<String, CaptureGroup> captureGroups = new java.util.HashMap<>();
+	private final Map<String, CaptureGroup> captureGroups = new ConcurrentHashMap<>();
 	private final Set<String> raidGroupsBeingSubmitted = ConcurrentHashMap.newKeySet();
-	private CaptureGroup recentTriggerGroup;
-	private volatile String activeAccount;
-	private final Set<String> uploadsInFlight = ConcurrentHashMap.newKeySet();
+	private volatile CaptureGroup recentTriggerGroup;
 	@Inject private Client client;
 	@Inject private AnchorConfig config;
 	@Inject private ScreenshotService screenshots;
@@ -52,15 +50,6 @@ public class EventPipeline
 
 	public void addListener(Runnable listener) { listeners.add(listener); }
 	public void removeListener(Runnable listener) { listeners.remove(listener); }
-
-	public String activeAccount() { return activeAccount; }
-
-	public void setActiveAccount(String account)
-	{
-		if (java.util.Objects.equals(activeAccount, account)) return;
-		activeAccount = account;
-		notifyListeners();
-	}
 
 	public void capture(String type, String dedupeKey, AnchorModels.Source source, List<AnchorModels.Item> items,
 		java.util.Map<String, Object> details, boolean includeParty)
@@ -88,16 +77,15 @@ public class EventPipeline
 		boolean screenshotRequired, boolean finalizeSubmission, AnchorModels.Party partyOverride)
 	{
 		if ("diary".equals(type) && !diaryContract.isEligible(details)) return;
-		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+		Player local = client.getLocalPlayer();
 		long now = System.currentTimeMillis();
-		if (player == null || !player.accountHash.equals(activeAccount)
-			|| !deduplicator.accept(player.accountHash + '|' + type + '|' + dedupeKey, now)) return;
-		CaptureGroup group = groupFor(player.accountHash, type, source, details, now);
+		if (local == null || local.getName() == null || !deduplicator.accept(type + '|' + dedupeKey, now)) return;
+		CaptureGroup group = groupFor(type, source, details, now);
 		boolean coordinatedRaidEvidence = group.coordinatesRaidEvidence(type);
 		group.captureStarted(now);
 		AnchorModels.EventEnvelope envelope = new AnchorModels.EventEnvelope();
 		envelope.eventId = UUID.randomUUID().toString(); envelope.eventType = type; envelope.capturedAt = Instant.now().toString();
-		envelope.player = player;
+		envelope.player = new AnchorModels.PlayerIdentity(); envelope.player.name = local.getName(); envelope.player.accountHash = String.valueOf(client.getAccountHash());
 		envelope.source = source; if (items != null) envelope.items.addAll(items); if (details != null) envelope.details.putAll(details);
 		String partySource = source == null ? null : source.name;
 		if (partySource == null && details != null && details.get("record") instanceof AnchorModels.PbRecord)
@@ -146,7 +134,7 @@ public class EventPipeline
 			});
 			return;
 		}
-		screenshots.captureNextFrame(player, image ->
+		screenshots.captureNextFrame(image ->
 		{
 			if (image == null)
 			{
@@ -176,39 +164,32 @@ public class EventPipeline
 		});
 	}
 
-	public void retryAll(String account, boolean manual)
+	public void retryAll()
 	{
+		// Reading the outbox and the screenshot bytes can be expensive. This method is
+		// also called while features are activated from the client thread.
 		executor.execute(() ->
 		{
-			for (EvidenceStore.Record record : store.records(account))
-				if (canUpload(record, manual)) upload(record, manual);
+			for (EvidenceStore.Record record : store.records())
+				if (record.status == AnchorModels.EventStatus.PENDING || record.status == AnchorModels.EventStatus.FAILED) upload(record, true);
 		});
-	}
-
-	private static boolean canUpload(EvidenceStore.Record record, boolean manual)
-	{
-		return record.status == AnchorModels.EventStatus.PENDING || record.status == AnchorModels.EventStatus.FAILED
-			|| (record.status == AnchorModels.EventStatus.UPLOADING && record.submissionId == null)
-			|| (manual && record.status == AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED);
 	}
 
 	public List<EvidenceStore.Record> groupRecords(EvidenceStore.Record record)
 	{
 		String groupId = submissionGroupId(record);
 		if (groupId == null) return record == null ? java.util.Collections.emptyList() : java.util.Collections.singletonList(record);
-		return groupRecords(groupId, record.metadata.player.accountHash);
-	}
-
-	public synchronized void discardLocal(EvidenceStore.Record record)
-	{
-		if (EvidenceStore.belongsTo(record, activeAccount) && !uploadsInFlight.contains(eventId(record)))
-			store.deleteLocal(eventId(record));
+		List<EvidenceStore.Record> matches = new ArrayList<>();
+		for (EvidenceStore.Record candidate : store.records())
+			if (groupId.equals(submissionGroupId(candidate))) matches.add(candidate);
+		return matches;
 	}
 
 	public void retryGroup(EvidenceStore.Record record)
 	{
 		for (EvidenceStore.Record member : groupRecords(record))
-			if (canUpload(member, true)) upload(member, true);
+			if (member.status == AnchorModels.EventStatus.PENDING || member.status == AnchorModels.EventStatus.FAILED)
+				upload(member, true);
 	}
 
 	public void updateAndSubmitGroup(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers,
@@ -219,87 +200,56 @@ public class EventPipeline
 				updateAndSubmit(member, partySize, clanMembers, nonClanMembers, partyMembers, notes);
 	}
 
-	public synchronized void upload(EvidenceStore.Record candidate, boolean manual)
+	public void upload(EvidenceStore.Record record, boolean manual)
 	{
-		if (!EvidenceStore.belongsTo(candidate, activeAccount)) return;
-		EvidenceStore.Record record = store.record(candidate.metadata.eventId);
-		if (!EvidenceStore.belongsTo(record, activeAccount) || !canUpload(record, manual)) return;
-		String id = eventId(record);
-		if (uploadsInFlight.contains(id)) return;
-		String code = config.authenticationCode();
-		if (code == null || code.isBlank()) return;
-
-		boolean held = record.status == AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED;
-		if (record.status == AnchorModels.EventStatus.PENDING && !diaryEligible(record)) return;
+		if (!diaryEligible(record)) return;
+		String code = config.authenticationCode() == null ? "" : config.authenticationCode().trim();
+		if (code.isEmpty())
+		{
+			log.error("Skipped upload for event {} ({}): no authentication code is configured", eventId(record), eventType(record));
+			return;
+		}
+		record.status = AnchorModels.EventStatus.UPLOADING; record.error = null; record.updatedAt = Instant.now().toString(); persist(record);
 		Filepath screenshot;
 		try { screenshot = store.screenshot(record); }
 		catch (java.io.IOException | IllegalArgumentException e)
 		{
-			if (!held)
-			{
-				record.status = AnchorModels.EventStatus.FAILED;
-				record.error = "Invalid evidence reference";
-				persist(record);
-			}
+			record.status = AnchorModels.EventStatus.FAILED;
+			record.error = "Invalid evidence reference";
+			persist(record);
 			return;
 		}
-		uploadsInFlight.add(id);
-		if (!held)
+		executor.execute(() ->
 		{
-			record.status = AnchorModels.EventStatus.UPLOADING;
-			record.error = null;
-			record.updatedAt = Instant.now().toString();
-			persist(record);
-		}
-		api.uploadEventJson(store.uploadMetadata(record), screenshot, record.format, result -> finishUpload(record, manual, held, result));
-	}
-
-	private synchronized void finishUpload(EvidenceStore.Record record, boolean manual, boolean held,
-		AnchorApiClient.ApiResult<AnchorModels.EventResponse> result)
-	{
-		AnchorModels.EventResponse value = result.value;
-		boolean replay = result.idempotentReplay && value != null
-			&& (value.eventId == null || record.metadata.eventId.equals(value.eventId));
-		if ((result.isSuccessful() || replay) && value != null)
-		{
-			record.submissionId = value.submissionId;
-			record.status = replay && value.status == null && value.submissionId == null
-				? AnchorModels.EventStatus.UPLOADED : parseStatus(value.status);
-			record.error = validationSummary(value.validationMessages);
-			record.retryCount = 0;
-		}
-		else if (result.needsIdentityReview())
-		{
-			record.status = AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED;
-			record.error = result.error;
-		}
-		else if (!held)
-		{
-			record.status = AnchorModels.EventStatus.FAILED;
-			record.error = result.error != null ? result.error
-				: result.idempotentReplay ? "Replay response did not match this event" : "Empty server response";
-			record.retryCount++;
-			if (!manual && result.isRetryable() && record.retryCount <= 5)
+			if (!diaryEligible(record)) return;
+			api.uploadEvent(record.metadata, screenshot, record.format, result ->
 			{
-				long delay = Math.min(300, 5L << Math.min(6, record.retryCount));
-				executor.schedule(() -> retryFailedUpload(record), delay, TimeUnit.SECONDS);
-			}
-		}
-		record.updatedAt = Instant.now().toString();
-		persist(record);
-		uploadsInFlight.remove(eventId(record));
-		if (EvidenceStore.belongsTo(record, activeAccount))
-		{
-			if (isCoordinatedRaidRecord(record)) maybeAutoSubmitRaidGroup(record);
-			else if (record.status == AnchorModels.EventStatus.DRAFT && shouldAutoSubmit(record)) autoSubmit(record);
-		}
-	}
-
-	private synchronized void retryFailedUpload(EvidenceStore.Record failed)
-	{
-		EvidenceStore.Record record = store.record(eventId(failed));
-		if (record != null && record.status == AnchorModels.EventStatus.FAILED
-			&& record.retryCount == failed.retryCount) upload(record, false);
+				if (result.isSuccessful() && result.value != null)
+				{
+					record.submissionId = result.value.submissionId; record.status = parseStatus(result.value.status);
+					record.error = validationSummary(result.value.validationMessages);
+					record.retryCount = 0;
+				}
+				else
+				{
+					record.status = AnchorModels.EventStatus.FAILED;
+					record.error = result.error == null ? "Empty server response" : result.error;
+					record.retryCount++;
+					log.error("Evidence upload failed for event {} ({}): HTTP {}, error={}, retry={}, manual={}",
+						eventId(record), eventType(record), result.statusCode, record.error, record.retryCount, manual);
+					if (!manual && result.isRetryable() && record.retryCount <= 5)
+					{
+						long delay = Math.min(300, 5L << Math.min(6, record.retryCount));
+						executor.schedule(() -> upload(record, false), delay, TimeUnit.SECONDS);
+					}
+				}
+				record.updatedAt = Instant.now().toString(); persist(record);
+				// Any completed raid upload can unblock another member, including team
+				// loot that needs manual review or loot the server already submitted.
+				if (isCoordinatedRaidRecord(record)) maybeAutoSubmitRaidGroup(record);
+				else if (record.status == AnchorModels.EventStatus.DRAFT && shouldAutoSubmit(record)) autoSubmit(record);
+			});
+		});
 	}
 
 	private boolean isCoordinatedRaidRecord(EvidenceStore.Record record)
@@ -336,7 +286,7 @@ public class EventPipeline
 			group.uploadStarted = true;
 		}
 
-		List<EvidenceStore.Record> records = groupRecords(group.id, group.account);
+		List<EvidenceStore.Record> records = groupRecords(group.id);
 		if (records.isEmpty()) return;
 		prepareRaidGroup(records);
 		for (EvidenceStore.Record member : records)
@@ -344,28 +294,32 @@ public class EventPipeline
 				upload(member, false);
 	}
 
-	private List<EvidenceStore.Record> groupRecords(String groupId, String account)
+	private List<EvidenceStore.Record> groupRecords(String groupId)
 	{
 		List<EvidenceStore.Record> records = new ArrayList<>();
 		if (groupId == null) return records;
-		for (EvidenceStore.Record record : store.records(account))
+		for (EvidenceStore.Record record : store.records())
 			if (groupId.equals(submissionGroupId(record))) records.add(record);
 		return records;
 	}
 
-	private synchronized void prepareRaidGroup(List<EvidenceStore.Record> records)
+	private void prepareRaidGroup(List<EvidenceStore.Record> records)
 	{
 		boolean hasLoot = records.stream().anyMatch(record -> record.metadata != null
 			&& "loot".equals(record.metadata.eventType));
-		if (!hasLoot) return;
-		for (EvidenceStore.Record candidate : records)
+		for (EvidenceStore.Record record : records)
 		{
-			EvidenceStore.Record record = store.record(eventId(candidate));
-			if (record == null || record.status != AnchorModels.EventStatus.PENDING || !"collection_log".equals(record.metadata.eventType)
+			if (record.metadata == null || !"collection_log".equals(record.metadata.eventType)
 				|| !isRaidSource(record.metadata.source == null ? null : record.metadata.source.name)) continue;
-			// The normal raid-loot envelope is authoritative for the roster.
-			record.metadata.party = null;
-			store.updateParty(record);
+			if (hasLoot)
+			{
+				// The normal raid-loot envelope is authoritative for the roster.
+				record.metadata.party = null;
+			}
+			else if (record.metadata.party == null)
+			{
+				record.metadata.party = parties.snapshot(record.metadata.source.name, false);
+			}
 			try { store.writeRecord(record); }
 			catch (Exception e) { log.error("Could not prepare raid evidence group {}", submissionGroupId(record), e); }
 		}
@@ -374,14 +328,13 @@ public class EventPipeline
 	private void maybeAutoSubmitRaidGroup(EvidenceStore.Record trigger)
 	{
 		String groupId = trigger == null ? null : submissionGroupId(trigger);
-		List<EvidenceStore.Record> records = groupRecords(groupId, activeAccount);
+		List<EvidenceStore.Record> records = groupRecords(groupId);
 		if (records.isEmpty()) return;
 		for (EvidenceStore.Record record : records)
 			if (record.status != AnchorModels.EventStatus.DRAFT
 				&& record.status != AnchorModels.EventStatus.SUBMITTED
 				&& record.status != AnchorModels.EventStatus.APPROVED
-				&& record.status != AnchorModels.EventStatus.REJECTED
-				&& record.status != AnchorModels.EventStatus.UPLOADED) return;
+				&& record.status != AnchorModels.EventStatus.REJECTED) return;
 
 		AnchorModels.Party party = null;
 		for (EvidenceStore.Record record : records)
@@ -482,7 +435,7 @@ public class EventPipeline
 	private void updateAndSubmit(EvidenceStore.Record record, int partySize, int clanMembers, int nonClanMembers,
 		List<AnchorModels.PartyMember> partyMembers, String notes, Runnable completion)
 	{
-		if (!EvidenceStore.belongsTo(record, activeAccount) || !diaryEligible(record))
+		if (!diaryEligible(record))
 		{
 			completion.run();
 			return;
@@ -516,7 +469,6 @@ public class EventPipeline
 			record.metadata.party.submittedClanMemberCount = clan;
 			record.metadata.party.submittedNonClanMemberCount = nonClan;
 			record.metadata.party.submittedMembers = members;
-			store.updateParty(record);
 		}
 		api.updateSubmission(record.submissionId, size, clan, nonClan, members, notes == null ? "" : notes, patched ->
 		{
@@ -530,13 +482,8 @@ public class EventPipeline
 				completion.run();
 				return;
 			}
-			if (!EvidenceStore.belongsTo(record, activeAccount) || !diaryEligible(record))
+			if (!diaryEligible(record))
 			{
-				if (!EvidenceStore.belongsTo(record, activeAccount))
-				{
-					record.status = AnchorModels.EventStatus.DRAFT;
-					persist(record);
-				}
 				completion.run();
 				return;
 			}
@@ -556,9 +503,9 @@ public class EventPipeline
 		});
 	}
 
-	public void refreshStatuses(String playerName, String account)
+	public void refreshStatuses(String playerName)
 	{
-		if (account == null || playerName == null || playerName.isBlank()) return;
+		if (playerName == null || playerName.isBlank()) return;
 		api.getSubmissions(playerName, result ->
 		{
 			if (!result.isSuccessful() || result.value == null)
@@ -567,29 +514,20 @@ public class EventPipeline
 					result.error == null ? "empty server response" : result.error);
 				return;
 			}
-			applyStatuses(account, result.value);
-		});
-	}
-
-	private synchronized void applyStatuses(String account, AnchorModels.SubmissionSummary[] summaries)
-	{
-		if (!account.equals(activeAccount)) return;
-		List<EvidenceStore.Record> records = store.records(account);
-		for (AnchorModels.SubmissionSummary summary : summaries)
-		{
-			for (EvidenceStore.Record record : records)
+			List<EvidenceStore.Record> records = store.records();
+			for (AnchorModels.SubmissionSummary summary : result.value)
 			{
-				if (uploadsInFlight.contains(eventId(record)) || record.status == AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED
-					|| (record.submissionId == null && record.status != AnchorModels.EventStatus.UPLOADED)) continue;
-				if ((summary.eventId != null && summary.eventId.equals(record.metadata.eventId))
-					|| (summary.submissionId != null && summary.submissionId.equals(record.submissionId)))
+				for (EvidenceStore.Record record : records)
 				{
-					record.submissionId = summary.submissionId;
-					record.status = parseStatus(summary.status);
-					persist(record);
+					if ((summary.eventId != null && summary.eventId.equals(record.metadata.eventId))
+						|| (summary.submissionId != null && summary.submissionId.equals(record.submissionId)))
+					{
+						record.submissionId = summary.submissionId; record.status = parseStatus(summary.status);
+						persist(record);
+					}
 				}
 			}
-		}
+		});
 	}
 
 	private boolean diaryEligible(EvidenceStore.Record record)
@@ -609,19 +547,18 @@ public class EventPipeline
 	}
 	private void notifyListeners() { for (Runnable listener : listeners) listener.run(); }
 
-	private CaptureGroup groupFor(String account, String type, AnchorModels.Source source,
+	private synchronized CaptureGroup groupFor(String type, AnchorModels.Source source,
 		java.util.Map<String, Object> details, long now)
 	{
-		String encounter = encounterKey(source, details);
-		String key = encounter == null ? null : account + "|" + encounter;
+		String key = encounterKey(source, details);
 		CaptureGroup group = key == null ? null : captureGroups.get(key);
 		if (group == null || now - group.lastSeen > 8_000L || group.contains(type))
 		{
 			CaptureGroup recent = recentTriggerGroup;
-			boolean triggerPair = recent != null && account.equals(recent.account) && now - recent.lastSeen <= 4_000L
+			boolean triggerPair = recent != null && now - recent.lastSeen <= 4_000L
 				&& (("bingo".equals(type) && recent.contains("personal_best"))
 					|| ("personal_best".equals(type) && recent.contains("bingo")));
-			group = triggerPair ? recent : new CaptureGroup(UUID.randomUUID().toString(), account, now,
+			group = triggerPair ? recent : new CaptureGroup(UUID.randomUUID().toString(), now,
 				isRaidSource(source == null ? null : source.name));
 			if (key != null) captureGroups.put(key, group);
 		}
@@ -630,12 +567,12 @@ public class EventPipeline
 		return group;
 	}
 
-	private synchronized void refreshStoredGroup(CaptureGroup group)
+	private void refreshStoredGroup(CaptureGroup group)
 	{
-		for (EvidenceStore.Record record : store.records(group.account))
+		for (EvidenceStore.Record record : store.records())
 		{
-			if (!group.id.equals(submissionGroupId(record)) || record.status != AnchorModels.EventStatus.PENDING) continue;
-			store.setSubmissionTypes(record, group.types());
+			if (!group.id.equals(submissionGroupId(record)) || record.metadata == null) continue;
+			record.metadata.context.put("submissionTypes", group.types());
 			try { store.writeRecord(record); }
 			catch (Exception e) { log.error("Could not update submission group {}", group.id, e); }
 		}
@@ -695,17 +632,15 @@ public class EventPipeline
 	private static final class CaptureGroup
 	{
 		private final String id;
-		private final String account;
 		private final boolean raid;
 		private final Set<String> eventTypes = new LinkedHashSet<>();
 		private long lastSeen;
 		private int pendingCaptures;
 		private boolean uploadStarted;
 		private ScheduledFuture<?> uploadTask;
-		private CaptureGroup(String id, String account, long lastSeen, boolean raid)
+		private CaptureGroup(String id, long lastSeen, boolean raid)
 		{
 			this.id = id;
-			this.account = account;
 			this.lastSeen = lastSeen;
 			this.raid = raid;
 		}

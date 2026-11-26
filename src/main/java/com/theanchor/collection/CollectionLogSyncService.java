@@ -5,9 +5,9 @@
  */
 package com.theanchor.collection;
 
+import com.google.gson.Gson;
+import com.theanchor.AnchorConfig;
 import com.theanchor.api.AnchorApiClient;
-import com.theanchor.api.SyncOutbox;
-import com.theanchor.model.CharacterIdentity;
 import com.theanchor.model.AnchorModels;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -25,6 +25,7 @@ import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.ItemComposition;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 
@@ -33,25 +34,37 @@ import net.runelite.client.game.ItemManager;
 public class CollectionLogSyncService
 {
 	static final int COLLECTION_ITEM_SCRIPT = 4100;
+	private static final String PENDING_PREFIX = "collectionLogPending.";
 
 	private final Client client;
-	private final SyncOutbox outbox;
+	private final ConfigManager configManager;
+	private final Gson gson;
+	private final AnchorApiClient api;
 	private final CollectionLogPromptState promptState;
 	private final ItemManager itemManager;
 	private final ScheduledExecutorService executor;
 	private final Map<Integer, Integer> items = new LinkedHashMap<>();
 	private int lastItemScriptTick = -1;
-	private String itemAccountHash;
+	private volatile String lastSuccessfulAccountHash;
 
 	@Inject
-	public CollectionLogSyncService(Client client, SyncOutbox outbox, CollectionLogPromptState promptState,
-		ItemManager itemManager, ScheduledExecutorService executor)
+	public CollectionLogSyncService(Client client, ConfigManager configManager, Gson gson, AnchorApiClient api,
+		CollectionLogPromptState promptState, ItemManager itemManager, ScheduledExecutorService executor)
 	{
 		this.client = client;
-		this.outbox = outbox;
+		this.configManager = configManager;
+		this.gson = gson;
+		this.api = api;
 		this.promptState = promptState;
 		this.itemManager = itemManager;
 		this.executor = executor;
+	}
+
+	/** Keeps the lightweight unit-test constructor while production uses the executor. */
+	public CollectionLogSyncService(Client client, ConfigManager configManager, Gson gson, AnchorApiClient api,
+		CollectionLogPromptState promptState, ItemManager itemManager)
+	{
+		this(client, configManager, gson, api, promptState, itemManager, null);
 	}
 
 	@Subscribe
@@ -68,15 +81,8 @@ public class CollectionLogSyncService
 		int itemId = ((Number) args[1]).intValue();
 		int quantity = ((Number) args[2]).intValue();
 		if (itemId <= 0 || quantity <= 0) return;
-		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
-		if (player == null) return;
-		synchronized (items)
-		{
-			if (!player.accountHash.equals(itemAccountHash)) items.clear();
-			itemAccountHash = player.accountHash;
-			items.put(itemId, quantity);
-			lastItemScriptTick = client.getTickCount();
-		}
+		synchronized (items) { items.put(itemId, quantity); }
+		lastItemScriptTick = client.getTickCount();
 	}
 
 	@Subscribe
@@ -84,38 +90,37 @@ public class CollectionLogSyncService
 	{
 		if (event.getGameState() != GameState.HOPPING && event.getGameState() != GameState.LOGGED_IN)
 		{
-			beginCapture();
+			synchronized (items) { items.clear(); }
+			lastItemScriptTick = -1;
 		}
 	}
 
 	/** Discards the previous opening's rows before requesting a fresh full log. */
 	public void beginCapture()
 	{
-		synchronized (items)
-		{
-			items.clear();
-			itemAccountHash = null;
-			lastItemScriptTick = -1;
-		}
+		synchronized (items) { items.clear(); }
+		lastItemScriptTick = -1;
 	}
 
 	/** Called after the open collection log has finished populating its item rows. */
 	public boolean syncCapturedItems()
 	{
-		return syncCapturedItems(result -> { });
+		return syncCapturedItems(success -> { });
 	}
 
 	/** Starts a sync and reports whether the server accepted it. */
-	public boolean syncCapturedItems(Consumer<AnchorApiClient.ApiResult<Map>> completion)
+	public boolean syncCapturedItems(Consumer<Boolean> completion)
 	{
-		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
-		if (player == null) return false;
-		Map<Integer, Integer> captured;
-		synchronized (items)
+		if (client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null
+			|| client.getAccountHash() == 0L)
 		{
-			if (!player.accountHash.equals(itemAccountHash) || lastItemScriptTick + 2 >= client.getTickCount())
-				return false;
-			captured = new LinkedHashMap<>(items);
+			return false;
+		}
+		Map<Integer, Integer> captured;
+		synchronized (items) { captured = new LinkedHashMap<>(items); }
+		if (lastItemScriptTick != -1 && lastItemScriptTick + 2 >= client.getTickCount())
+		{
+			return false;
 		}
 		if (captured.isEmpty())
 		{
@@ -126,25 +131,24 @@ public class CollectionLogSyncService
 		// Capture only the small client-thread-safe metadata here. A full collection
 		// log can contain thousands of rows, so request assembly and serialisation are
 		// deliberately deferred to the worker executor.
-		AnchorModels.CollectionLogRequest request = collectMetadata(player);
-		executor.execute(() ->
+		AnchorModels.CollectionLogRequest request = collectMetadata();
+		Runnable persistAndSend = () ->
 		{
 			addCapturedItems(request, captured, false);
-			outbox.enqueue(SyncOutbox.Kind.COLLECTION_LOG, request, completion::accept);
-		});
+			configManager.setConfiguration(AnchorConfig.GROUP, pendingKeyFor(request), gson.toJson(request));
+			send(request, completion);
+		};
+		if (executor == null) persistAndSend.run();
+		else executor.execute(persistAndSend);
 		return true;
 	}
 
 	/** True once this opening of the collection log has produced and settled its item rows. */
 	public boolean isCaptureReadySince(int openedAtTick)
 	{
-		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
-		synchronized (items)
-		{
-			return player != null && player.accountHash.equals(itemAccountHash)
-				&& lastItemScriptTick >= openedAtTick - 1 && lastItemScriptTick + 2 < client.getTickCount()
-				&& !items.isEmpty();
-		}
+		if (client.getGameState() != GameState.LOGGED_IN || lastItemScriptTick < openedAtTick - 1
+			|| lastItemScriptTick + 2 >= client.getTickCount()) return false;
+		synchronized (items) { return !items.isEmpty(); }
 	}
 
 	public boolean hasCapturedItems()
@@ -154,36 +158,60 @@ public class CollectionLogSyncService
 
 	public boolean hasSyncedCurrentAccount()
 	{
-		return promptState.hasSyncedForCurrentAccount();
-	}
-
-	public boolean needsIdentityReview()
-	{
-		return outbox.hasReview(SyncOutbox.Kind.COLLECTION_LOG, CharacterIdentity.capture(client));
+		return Long.toString(client.getAccountHash()).equals(lastSuccessfulAccountHash)
+			|| promptState.hasSyncedForCurrentAccount();
 	}
 
 	public boolean isAutomaticSyncDue()
 	{
-		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
-		return player != null && outbox.isReady(player.accountHash)
-			&& !outbox.hasReview(SyncOutbox.Kind.COLLECTION_LOG, player) && promptState.isAutomaticSyncDue();
+		return promptState.isAutomaticSyncDue();
+	}
+
+	public void retryPending()
+	{
+		String key = pendingKey();
+		if (key == null) return;
+		Runnable retry = () -> retryPending(key);
+		if (executor == null) retry.run();
+		else executor.execute(retry);
+	}
+
+	private void retryPending(String key)
+	{
+		String json = configManager.getConfiguration(AnchorConfig.GROUP, key);
+		if (json == null || json.isBlank()) return;
+		try
+		{
+			AnchorModels.CollectionLogRequest request = gson.fromJson(json, AnchorModels.CollectionLogRequest.class);
+			if (request == null || request.syncId == null || request.items == null || request.items.isEmpty())
+			{
+				configManager.unsetConfiguration(AnchorConfig.GROUP, key);
+				return;
+			}
+			send(request, success -> { });
+		}
+		catch (RuntimeException e)
+		{
+			configManager.unsetConfiguration(AnchorConfig.GROUP, key);
+			log.error("Discarded unreadable pending collection log snapshot", e);
+		}
 	}
 
 	AnchorModels.CollectionLogRequest collect(Map<Integer, Integer> captured)
 	{
-		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
-		if (player == null) return null;
-		AnchorModels.CollectionLogRequest request = collectMetadata(player);
+		AnchorModels.CollectionLogRequest request = collectMetadata();
 		addCapturedItems(request, captured, true);
 		return request;
 	}
 
-	private AnchorModels.CollectionLogRequest collectMetadata(AnchorModels.PlayerIdentity player)
+	private AnchorModels.CollectionLogRequest collectMetadata()
 	{
 		AnchorModels.CollectionLogRequest request = new AnchorModels.CollectionLogRequest();
 		request.syncId = UUID.randomUUID().toString();
 		request.capturedAt = Instant.now().toString();
-		request.player = player;
+		request.player = new AnchorModels.PlayerIdentity();
+		request.player.name = client.getLocalPlayer().getName();
+		request.player.accountHash = Long.toString(client.getAccountHash());
 		request.obtainedCount = client.getVarpValue(VarPlayerID.COLLECTION_COUNT);
 		request.totalCount = client.getVarpValue(VarPlayerID.COLLECTION_COUNT_MAX);
 		addCategory(request, "bosses", VarPlayerID.COLLECTION_COUNT_BOSSES, VarPlayerID.COLLECTION_COUNT_BOSSES_MAX);
@@ -206,6 +234,12 @@ public class CollectionLogSyncService
 				if (includeNames) request.itemNames.put(itemId, resolveItemName(entry.getKey()));
 			}
 		}
+	}
+
+	private String pendingKeyFor(AnchorModels.CollectionLogRequest request)
+	{
+		return request == null || request.player == null || request.player.accountHash == null
+			? pendingKey() : PENDING_PREFIX + request.player.accountHash;
 	}
 
 	private String resolveItemName(int itemId)
@@ -236,4 +270,28 @@ public class CollectionLogSyncService
 		request.categories.put(name, progress);
 	}
 
+	private void send(AnchorModels.CollectionLogRequest request, Consumer<Boolean> completion)
+	{
+		api.syncCollectionLog(request, result ->
+		{
+			if (result.isSuccessful())
+			{
+				lastSuccessfulAccountHash = request.player.accountHash;
+				promptState.markSyncedForAccount(request.player.accountHash);
+				configManager.unsetConfiguration(AnchorConfig.GROUP, PENDING_PREFIX + request.player.accountHash);
+			}
+			else
+			{
+				log.error("Collection log sync failed and remains queued: player={}, syncId={}, error={}",
+					request.player.name, request.syncId, result.error);
+			}
+			completion.accept(result.isSuccessful());
+		});
+	}
+
+	private String pendingKey()
+	{
+		long hash = client.getAccountHash();
+		return hash == 0L ? null : PENDING_PREFIX + hash;
+	}
 }

@@ -5,8 +5,7 @@
  */
 package com.theanchor.progress;
 
-import com.theanchor.api.SyncOutbox;
-import com.theanchor.model.CharacterIdentity;
+import com.theanchor.api.AnchorApiClient;
 import com.theanchor.model.AnchorModels;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -17,6 +16,7 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.EnumComposition;
+import net.runelite.api.GameState;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
@@ -137,44 +137,48 @@ public class PlayerProgressService
 	}
 
 	private final Client client;
-	private final SyncOutbox outbox;
+	private final AnchorApiClient api;
 	private final ClientThread clientThread;
 	private volatile IncrementalSync incrementalSync;
 
 	@Inject
-	public PlayerProgressService(Client client, SyncOutbox outbox, ClientThread clientThread)
+	public PlayerProgressService(Client client, AnchorApiClient api, ClientThread clientThread)
 	{
 		this.client = client;
-		this.outbox = outbox;
+		this.api = api;
 		this.clientThread = clientThread;
 	}
 
-	public void cancelCapture()
+	/** Keeps the lightweight unit-test constructor while production uses ClientThread. */
+	public PlayerProgressService(Client client, AnchorApiClient api)
 	{
-		incrementalSync = null;
+		this(client, api, null);
 	}
 
 	public void syncAll()
 	{
-		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
-		if (player == null || outbox.hasReview(SyncOutbox.Kind.PLAYER_PROGRESS, player) || incrementalSync != null)
+		if (client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null)
+		{
 			return;
+		}
 
-		IncrementalSync sync = new IncrementalSync();
-		sync.request.syncId = UUID.randomUUID().toString();
-		sync.request.capturedAt = Instant.now().toString();
-		sync.request.player = player;
-		incrementalSync = sync;
-		clientThread.invokeLater(() -> advanceIncrementalSync(sync));
+		if (clientThread == null)
+		{
+			send(collect());
+			return;
+		}
+		if (incrementalSync != null) return;
+		incrementalSync = new IncrementalSync();
+		clientThread.invokeLater(this::advanceIncrementalSync);
 	}
 
-	private void advanceIncrementalSync(IncrementalSync sync)
+	private void advanceIncrementalSync()
 	{
-		if (sync != incrementalSync) return;
-		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
-		if (player == null || !player.accountHash.equals(sync.request.player.accountHash))
+		IncrementalSync sync = incrementalSync;
+		if (sync == null) return;
+		if (client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null)
 		{
-			cancelCapture();
+			incrementalSync = null;
 			return;
 		}
 
@@ -183,6 +187,11 @@ public class PlayerProgressService
 			switch (sync.stage)
 			{
 				case 0:
+					sync.request.syncId = UUID.randomUUID().toString();
+					sync.request.capturedAt = Instant.now().toString();
+					sync.request.player = new AnchorModels.PlayerIdentity();
+					sync.request.player.name = client.getLocalPlayer().getName();
+					sync.request.player.accountHash = Long.toString(client.getAccountHash());
 					sync.request.combatAchievements = newCombatAchievementProgress();
 					sync.request.quests = new AnchorModels.QuestProgress();
 					sync.stage = 1;
@@ -220,7 +229,7 @@ public class PlayerProgressService
 					break;
 				case 5:
 					incrementalSync = null;
-					outbox.enqueue(SyncOutbox.Kind.PLAYER_PROGRESS, sync.request, null);
+					send(sync.request);
 					return;
 				default:
 					incrementalSync = null;
@@ -234,7 +243,7 @@ public class PlayerProgressService
 			return;
 		}
 
-		clientThread.invokeLater(() -> advanceIncrementalSync(sync));
+		clientThread.invokeLater(this::advanceIncrementalSync);
 	}
 
 	/** Processes at most one diary area or one combat-achievement task per client loop. */
@@ -272,6 +281,18 @@ public class PlayerProgressService
 		sync.structIds = null;
 		sync.structIndex = 0;
 		return true;
+	}
+
+	private void send(AnchorModels.PlayerProgressRequest request)
+	{
+		api.syncPlayerProgress(request, result ->
+		{
+			if (!result.isSuccessful())
+			{
+				log.error("Anchor progress sync failed: player={}, syncId={}, error={}",
+					request.player.name, request.syncId, result.error);
+			}
+		});
 	}
 
 	private AnchorModels.CombatAchievementProgress newCombatAchievementProgress()
@@ -364,12 +385,12 @@ public class PlayerProgressService
 
 	AnchorModels.PlayerProgressRequest collect()
 	{
-		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
-		if (player == null) return null;
 		AnchorModels.PlayerProgressRequest request = new AnchorModels.PlayerProgressRequest();
 		request.syncId = UUID.randomUUID().toString();
 		request.capturedAt = Instant.now().toString();
-		request.player = player;
+		request.player = new AnchorModels.PlayerIdentity();
+		request.player.name = client.getLocalPlayer().getName();
+		request.player.accountHash = Long.toString(client.getAccountHash());
 		request.combatAchievements = collectCombatAchievements();
 		request.quests = collectQuests();
 		request.achievementDiaries = collectAchievementDiaries();

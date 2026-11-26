@@ -49,14 +49,6 @@ public class PetEventListener
 	private String recentNamedPet;
 	private long recentNamedPetAt;
 
-	public void reset()
-	{
-		pendingPetMessage = null;
-		recentCollectionItem = null;
-		recentBossSource = null;
-		recentNamedPet = null;
-	}
-
 	@Subscribe public void onGameTick(GameTick event)
 	{
 		if (pendingPetMessage != null && System.currentTimeMillis() - pendingPetAt > 5000L)

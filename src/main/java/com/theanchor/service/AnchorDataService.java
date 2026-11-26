@@ -100,7 +100,6 @@ public class AnchorDataService
 	private volatile Connection connection = Connection.NOT_CONFIGURED;
 	private volatile String message = "Log in to load your Anchor profile";
 	private volatile String requestedPlayerName;
-	private volatile Object profileRequest;
 	private volatile boolean currentPlayerClanMember;
 
 	public void addListener(Runnable listener) { listeners.add(listener); }
@@ -139,9 +138,8 @@ public class AnchorDataService
 	public String message() { return message; }
 	public boolean isCurrentPlayerClanMember() { return currentPlayerClanMember; }
 
-	public synchronized void loggedOut()
+	public void loggedOut()
 	{
-		profileRequest = null;
 		requestedPlayerName = null;
 		currentPlayerClanMember = false;
 		profile = null;
@@ -151,7 +149,7 @@ public class AnchorDataService
 		notifyListeners();
 	}
 
-	public synchronized void refresh(String playerName)
+	public void refresh(String playerName)
 	{
 		if (playerName == null || playerName.isBlank()) { loggedOut(); return; }
 		String requestedName = playerName.trim();
@@ -163,48 +161,39 @@ public class AnchorDataService
 			currentPlayerClanMember = false;
 		}
 		requestedPlayerName = requestedName;
-		Object request = new Object();
-		profileRequest = request;
 		message = "Loading " + playerName + "…"; notifyListeners();
 		api.getProfile(playerName, result ->
 		{
 			// An account switch can complete before the previous profile request. Never
 			// let that stale response activate the plugin for the newly logged-in RSN.
-			synchronized (this)
+			if (!samePlayer(requestedPlayerName, requestedName)) return;
+			if (result.isSuccessful() && result.value != null)
 			{
-				if (profileRequest != request) return;
-				if (result.isSuccessful() && result.value != null)
+				profile = result.value;
+				// The profile endpoint is queried for requestedName and only returns a
+				// member profile for rostered players. Do not make feature activation
+				// depend on the optional/canonical member.name response field.
+				currentPlayerClanMember = profile.member != null;
+				message = currentPlayerClanMember ? "Profile loaded" : "Not found in The Anchor roster";
+				if (currentPlayerClanMember)
 				{
-					profile = result.value;
-					// The profile endpoint is queried for requestedName and only returns a
-					// member profile for rostered players. Do not make feature activation
-					// depend on the optional/canonical member.name response field.
-					currentPlayerClanMember = profile.member != null;
-					message = currentPlayerClanMember ? "Profile loaded" : "Not found in The Anchor roster";
-					if (currentPlayerClanMember)
+					loadPvmDiaryStatus(requestedName);
+					String url = profileImageUrl(playerName);
+					images.loadProfile(playerName, url, image ->
 					{
-						loadPvmDiaryStatus(requestedName, request);
-						String url = profileImageUrl(playerName);
-						images.loadProfile(playerName, url, image ->
-						{
-							synchronized (this)
-							{
-								if (profileRequest != request) return;
-								profileImage = image;
-								notifyListeners();
-							}
-						});
-					}
-					else profile = null;
+						if (samePlayer(requestedPlayerName, requestedName)) profileImage = image;
+						notifyListeners();
+					});
 				}
-				else
-				{
-					profile = null;
-					currentPlayerClanMember = false;
-					message = result.statusCode == 404 ? "Not found in The Anchor roster" : result.error;
-				}
-				notifyListeners();
+				else profile = null;
 			}
+			else
+			{
+				profile = null;
+				currentPlayerClanMember = false;
+				message = result.statusCode == 404 ? "Not found in The Anchor roster" : result.error;
+			}
+			notifyListeners();
 		});
 		api.getCompetitionPanels(panelResult ->
 		{
@@ -268,17 +257,14 @@ public class AnchorDataService
 		loadCompetitionImage("sotw", panels == null ? null : panels.sotw);
 	}
 
-	private void loadPvmDiaryStatus(String playerName, Object request)
+	private void loadPvmDiaryStatus(String playerName)
 	{
 		if (playerName == null || playerName.isBlank()) { pvmDiaryStatus = null; return; }
 		api.getPvmDiaryStatus(playerName, result ->
 		{
-			synchronized (this)
-			{
-				if (profileRequest != request) return;
-				pvmDiaryStatus = result.isSuccessful() ? result.value : null;
-				notifyListeners();
-			}
+			if (!samePlayer(requestedPlayerName, playerName)) return;
+			pvmDiaryStatus = result.isSuccessful() ? result.value : null;
+			notifyListeners();
 		});
 	}
 

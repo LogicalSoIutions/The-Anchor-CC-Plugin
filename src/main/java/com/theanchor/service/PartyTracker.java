@@ -255,24 +255,18 @@ public class PartyTracker
 	public void onGameStateChanged(GameStateChanged event)
 	{
 		if (event.getGameState() == GameState.LOGIN_SCREEN || event.getGameState() == GameState.HOPPING)
-			resetEncounter();
-	}
-
-	public void resetEncounter()
-	{
-		target = null;
-		participants.clear();
-		idleTicks = 0;
-		activeRaidSource = null;
-		activeRaidNames = List.of();
-		activeRaidPartySize = 0;
-		raidStatusSource = null;
-		raidPlayerClanStatus.clear();
-		archiveEmptyTicks = 0;
-		clearCompletedRaid();
-		awaitingCompletedRosterClear = false;
-		recentRaidSource = null;
-		recentRaidSourceAt = 0;
+		{
+			activeRaidSource = null;
+			activeRaidNames = List.of();
+			activeRaidPartySize = 0;
+			raidStatusSource = null;
+			raidPlayerClanStatus.clear();
+			archiveEmptyTicks = 0;
+			clearCompletedRaid();
+			awaitingCompletedRosterClear = false;
+			recentRaidSource = null;
+			recentRaidSourceAt = 0;
+		}
 	}
 
 	private static NPC interactingNpc(List<Player> players)
