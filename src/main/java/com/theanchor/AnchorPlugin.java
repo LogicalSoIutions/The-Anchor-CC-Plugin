@@ -7,12 +7,15 @@ package com.theanchor;
 import com.google.inject.Provides;
 import com.theanchor.evidence.EventPipeline;
 import com.theanchor.evidence.EvidenceStore;
+import com.theanchor.api.SyncOutbox;
 import com.theanchor.collection.CollectionLogSyncService;
 import com.theanchor.events.CollectionLogEventListener;
 import com.theanchor.events.CombatTierEventListener;
 import com.theanchor.events.LootEventListener;
 import com.theanchor.events.WeaponCreationEventListener;
 import com.theanchor.events.PetEventListener;
+import com.theanchor.model.AnchorModels;
+import com.theanchor.model.CharacterIdentity;
 import com.theanchor.pb.PersonalBestService;
 import com.theanchor.progress.PlayerProgressService;
 import com.theanchor.service.AnchorDataService;
@@ -83,6 +86,7 @@ public class AnchorPlugin extends Plugin
 	@Inject private BingoService bingo;
 	@Inject private EvidenceStore evidence;
 	@Inject private EventPipeline pipeline;
+	@Inject private SyncOutbox syncOutbox;
 	@Inject private ImageCache imageCache;
 	@Inject private PersonalBestService pbs;
 	@Inject private com.theanchor.pb.PvmDiaryContractService diaryContract;
@@ -108,6 +112,8 @@ public class AnchorPlugin extends Plugin
 	private List<Object> registered;
 	private volatile boolean featuresActive;
 	private String firstConnectionSyncedAccount;
+	private String firstConnectionPbsAccount;
+	private String activeAccount;
 	private String activePlayerName;
 	private final Runnable connectionListener = () -> clientThread.invokeLater(this::updateFeatureActivation);
 
@@ -163,8 +169,7 @@ public class AnchorPlugin extends Plugin
 		overlayManager.remove(bingoEventOverlay);
 		eventAlerts.resetStateForWorldHopOrLogin();
 		bingo.clear();
-		activePlayerName = null;
-		firstConnectionSyncedAccount = null;
+		clearCharacter();
 		data.loggedOut();
 	}
 
@@ -175,13 +180,15 @@ public class AnchorPlugin extends Plugin
 			|| event.getGameState() == GameState.CONNECTION_LOST)
 		{
 			eventAlerts.resetStateForWorldHopOrLogin();
+			progress.cancelCapture();
+			pipeline.setActiveAccount(null);
+			syncOutbox.setActiveAccount(null);
 		}
 		if (event.getGameState() == GameState.LOGGED_IN) tryOnLoggedIn();
 		else if (event.getGameState() == GameState.LOGIN_SCREEN)
 		{
 			deactivateFeatures();
-			activePlayerName = null;
-			firstConnectionSyncedAccount = null;
+			clearCharacter();
 			bingo.clear();
 			data.loggedOut();
 		}
@@ -189,8 +196,8 @@ public class AnchorPlugin extends Plugin
 
 	@Subscribe public void onGameTick(GameTick event)
 	{
-		parties.debugRaidTick(featuresActive);
 		tryOnLoggedIn();
+		parties.debugRaidTick(featuresActive);
 		if (featuresActive) eventAlerts.onGameTick();
 	}
 
@@ -199,12 +206,20 @@ public class AnchorPlugin extends Plugin
 		if (!AnchorConfig.GROUP.equals(event.getGroup())) return;
 		switch (event.getKey())
 		{
-			case "authenticationCode": firstConnectionSyncedAccount = null; data.validate(); updateFeatureActivation(); break;
+			case "authenticationCode":
+				clientThread.invoke(() ->
+				{
+					firstConnectionSyncedAccount = null;
+					firstConnectionPbsAccount = null;
+					data.validate();
+					updateFeatureActivation();
+				});
+				break;
 			case "animatedBanner": panel.refreshBanner(); break;
 			case "eventAlerts": eventAlerts.resetStateForWorldHopOrLogin(); break;
-			case "refreshProfile": if (Boolean.parseBoolean(event.getNewValue())) { refreshCurrentPlayer(); resetAction(event.getKey()); } break;
-			case "retryOutbox": if (Boolean.parseBoolean(event.getNewValue())) { if (featuresActive) pipeline.retryAll(); resetAction(event.getKey()); } break;
-			case "clearImageCache": if (Boolean.parseBoolean(event.getNewValue())) { imageCache.clear(); refreshCurrentPlayer(); resetAction(event.getKey()); } break;
+			case "refreshProfile": if (Boolean.parseBoolean(event.getNewValue())) { clientThread.invoke(this::refreshCurrentPlayer); resetAction(event.getKey()); } break;
+			case "retryOutbox": if (Boolean.parseBoolean(event.getNewValue())) { clientThread.invoke(this::retryUploads); resetAction(event.getKey()); } break;
+			case "clearImageCache": if (Boolean.parseBoolean(event.getNewValue())) { imageCache.clear(); clientThread.invoke(this::refreshCurrentPlayer); resetAction(event.getKey()); } break;
 			default: break;
 		}
 	}
@@ -215,14 +230,46 @@ public class AnchorPlugin extends Plugin
 	private void onLoggedIn() { tryOnLoggedIn(); }
 	private void tryOnLoggedIn()
 	{
-		if (client.getGameState() != GameState.LOGGED_IN) return;
-		String name = currentName();
-		if (name == null || name.isBlank()) return;
-		if (name.equals(activePlayerName)) { updateFeatureActivation(); return; }
-		activePlayerName = name;
-		firstConnectionSyncedAccount = null;
-		data.refresh(name);
+		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+		if (player == null) return;
+		boolean accountChanged = !player.accountHash.equals(activeAccount);
+		if (accountChanged)
+		{
+			deactivateFeatures();
+			parties.resetEncounter();
+			data.loggedOut();
+		}
+		pipeline.setActiveAccount(player.accountHash);
+		syncOutbox.setActiveAccount(player.accountHash);
+		if (accountChanged || !player.name.equals(activePlayerName))
+		{
+			activeAccount = player.accountHash;
+			activePlayerName = player.name;
+			firstConnectionSyncedAccount = null;
+			firstConnectionPbsAccount = null;
+			data.refresh(player.name);
+		}
 		updateFeatureActivation();
+	}
+
+	private void clearCharacter()
+	{
+		progress.cancelCapture();
+		activePlayerName = null;
+		activeAccount = null;
+		firstConnectionSyncedAccount = null;
+		firstConnectionPbsAccount = null;
+		pipeline.setActiveAccount(null);
+		syncOutbox.setActiveAccount(null);
+	}
+
+	private void retryUploads()
+	{
+		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+		if (player == null || !player.accountHash.equals(activeAccount)
+			|| data.connection() != AnchorDataService.Connection.CONNECTED) return;
+		pipeline.retryAll(player.accountHash, true);
+		syncOutbox.retry(player.accountHash, true);
 	}
 
 	private void updateFeatureActivation()
@@ -230,10 +277,10 @@ public class AnchorPlugin extends Plugin
 		// Region loading can temporarily remove the local player. Preserve feature
 		// subscriptions and raid state through that transition; login/hop still reset normally.
 		if (client.getGameState() == GameState.LOADING) return;
-		String name = currentName();
-		if (client.getGameState() == GameState.LOGGED_IN && (name == null || name.isBlank())) return;
-		boolean shouldBeActive = client.getGameState() == GameState.LOGGED_IN
-			&& name != null && !name.isBlank()
+		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+		if (client.getGameState() == GameState.LOGGED_IN && player == null) return;
+		boolean shouldBeActive = player != null && player.accountHash.equals(activeAccount)
+			&& player.name.equals(activePlayerName)
 			&& data.connection() == AnchorDataService.Connection.CONNECTED
 			&& data.isCurrentPlayerClanMember();
 		if (!shouldBeActive)
@@ -246,14 +293,14 @@ public class AnchorPlugin extends Plugin
 			featuresActive = true;
 			weaponCreation.reset();
 			for (Object listener : registered) eventBus.register(listener);
+			collectionLogSync.beginCapture();
 			collectionLogAutoSync.startUp();
 			collectionLogRefreshButton.startUp();
 			bingo.refresh();
 			pbs.onLogin();
-			pipeline.retryAll();
-			pipeline.refreshStatuses(name);
+			pipeline.refreshStatuses(player.name, player.accountHash);
 		}
-		syncFirstConnectionData();
+		syncFirstConnectionData(player);
 	}
 
 	private void deactivateFeatures()
@@ -261,39 +308,49 @@ public class AnchorPlugin extends Plugin
 		if (!featuresActive) return;
 		featuresActive = false;
 		weaponCreation.reset();
+		collectionLog.reset();
+		pets.reset();
 		if (registered != null) for (Object listener : registered) eventBus.unregister(listener);
 		collectionLogRefreshButton.shutDown();
 		collectionLogAutoSync.shutDown();
 		firstConnectionSyncedAccount = null;
+		firstConnectionPbsAccount = null;
+		progress.cancelCapture();
 		eventAlerts.resetStateForWorldHopOrLogin();
 		bingo.clear();
 	}
 
-	private void syncFirstConnectionData()
+	private void syncFirstConnectionData(AnchorModels.PlayerIdentity player)
 	{
-		if (!featuresActive || !data.isCurrentPlayerClanMember()
-			|| data.connection() != AnchorDataService.Connection.CONNECTED
-			|| client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null) return;
-		String account = Long.toString(client.getAccountHash());
-		if ("0".equals(account)) return;
-		if (account.equals(firstConnectionSyncedAccount)) return;
-		firstConnectionSyncedAccount = account;
-		clientThread.invokeLater(progress::syncAll);
-		collectionLogSync.retryPending();
-		executor.execute(() -> pbs.syncAll(true));
+		String account = player.accountHash;
+		if (!syncOutbox.isReady(account)) return;
+		if (!account.equals(firstConnectionSyncedAccount))
+		{
+			firstConnectionSyncedAccount = account;
+			pipeline.retryAll(account, false);
+			syncOutbox.retry(account, false);
+			progress.syncAll();
+		}
+		if (!account.equals(firstConnectionPbsAccount) && pbs.syncAll()) firstConnectionPbsAccount = account;
 	}
+
 	private void refreshCurrentPlayer()
 	{
-		String name = currentName();
-		if (name == null || name.isBlank()) return;
-		data.refresh(name);
-		if (featuresActive) { bingo.refresh(); diaryContract.refresh(); pipeline.refreshStatuses(name); }
+		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+		if (player == null || !player.accountHash.equals(activeAccount)) return;
+		data.refresh(player.name);
+		if (featuresActive)
+		{
+			bingo.refresh();
+			diaryContract.refresh();
+			pipeline.refreshStatuses(player.name, player.accountHash);
+		}
 	}
 	private void runScheduledRefresh()
 	{
 		try
 		{
-			refreshCurrentPlayer();
+			clientThread.invokeLater(this::refreshCurrentPlayer);
 			data.refreshLeaderboards();
 		}
 		catch (RuntimeException e) { log.error("Unable to refresh Anchor data", e); }
@@ -301,10 +358,18 @@ public class AnchorPlugin extends Plugin
 	private void runScheduledProgressSync()
 	{
 		if (!featuresActive) return;
-		try { clientThread.invokeLater(progress::syncAll); }
+		try
+		{
+			clientThread.invokeLater(() ->
+			{
+				AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+				if (!featuresActive || player == null || !player.accountHash.equals(activeAccount)) return;
+				syncOutbox.retry(player.accountHash, false);
+				progress.syncAll();
+			});
+		}
 		catch (RuntimeException e) { log.error("Unable to schedule Anchor player progress sync", e); }
 	}
-	private String currentName() { return client.getLocalPlayer() == null ? null : client.getLocalPlayer().getName(); }
 
 	private BufferedImage loadIcon()
 	{

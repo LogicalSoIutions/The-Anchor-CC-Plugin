@@ -1,8 +1,9 @@
 package com.theanchor.evidence;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.theanchor.model.AnchorModels;
-import com.theanchor.service.ImageCache;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.StandardCopyOption;
@@ -29,11 +30,11 @@ public class EvidenceStore
 	{
 		ScreenshotEncoder.Encoded encoded = ScreenshotEncoder.encode(image);
 		LocalDate date = LocalDate.now();
-		Filepath dir = root.joinSegment("evidence").joinSegment(ImageCache.safeName(envelope.player.name)).joinSegment(date.toString());
+		Filepath dir = root.joinSegment("evidence").joinSegment(envelope.player.accountHash).joinSegment(date.toString());
 		dir.createDirectories();
 		Filepath imagePath = dir.joinSegment(envelope.eventId + "." + encoded.format);
 		imagePath.write(encoded.bytes);
-		Record record = new Record(); record.metadata = envelope; record.screenshotPath = "evidence/" + ImageCache.safeName(envelope.player.name) + "/" + date + "/" + imagePath.getFileName(); record.format = encoded.format;
+		Record record = new Record(); record.metadata = envelope; record.screenshotPath = "evidence/" + envelope.player.accountHash + "/" + date + "/" + imagePath.getFileName(); record.format = encoded.format;
 		record.status = AnchorModels.EventStatus.PENDING; record.updatedAt = Instant.now().toString();
 		writeRecord(record);
 		return record;
@@ -53,9 +54,9 @@ public class EvidenceStore
 	{
 		Filepath outbox = root.joinSegment("outbox"); outbox.createDirectories();
 		Filepath target = outbox.joinSegment(record.metadata.eventId + ".json"); Filepath temp = outbox.joinSegment(target.getFileName() + ".tmp");
-		String json = "diary".equals(record.metadata.eventType)
-			? gson.newBuilder().serializeNulls().create().toJson(record) : gson.toJson(record);
-		temp.write(json);
+		JsonObject saved = metadataGson(record).toJsonTree(record).getAsJsonObject();
+		if (record.rawMetadata != null) saved.add("metadata", record.rawMetadata);
+		temp.write(saved.toString());
 		temp.moveTo(target, StandardCopyOption.REPLACE_EXISTING);
 	}
 
@@ -64,15 +65,65 @@ public class EvidenceStore
 		Filepath outbox = root.joinSegment("outbox"); if (!outbox.isDirectory()) return new ArrayList<>();
 		try (java.util.stream.Stream<Filepath> paths = outbox.walk(1))
 		{
-			return paths.filter(p -> p.isFile() && p.getFileName().endsWith(".json")).map(this::read).filter(java.util.Objects::nonNull)
+			return paths.filter(p -> p.isFile() && p.getFileName().endsWith(".json")).map(this::read).filter(record -> record != null && record.metadata != null && record.metadata.capturedAt != null)
 				.sorted(Comparator.comparing((Record r) -> r.metadata.capturedAt).reversed()).collect(Collectors.toList());
 		}
 		catch (IOException e) { return new ArrayList<>(); }
 	}
 
+	public synchronized List<Record> records(String account)
+	{
+		if (account == null) return List.of();
+		return records().stream().filter(record -> belongsTo(record, account)).collect(Collectors.toList());
+	}
+
+	public synchronized Record record(String eventId)
+	{
+		return read(root.joinSegment("outbox").joinSegment(eventId + ".json"));
+	}
+
+	public static boolean belongsTo(Record record, String account)
+	{
+		return account != null && record != null && record.metadata != null
+			&& record.metadata.player != null && account.equals(record.metadata.player.accountHash);
+	}
+
+	String uploadMetadata(Record record)
+	{
+		return record.rawMetadata == null ? metadataGson(record).toJson(record.metadata) : record.rawMetadata.toString();
+	}
+
+	private Gson metadataGson(Record record)
+	{
+		// Completion-only diary requirements explicitly require result: null.
+		return "diary".equals(record.metadata.eventType) ? gson.newBuilder().serializeNulls().create() : gson;
+	}
+
+	void setSubmissionTypes(Record record, List<String> types)
+	{
+		record.metadata.context.put("submissionTypes", types);
+		if (record.rawMetadata != null)
+			record.rawMetadata.getAsJsonObject("context").add("submissionTypes", gson.toJsonTree(types));
+	}
+
+	void updateParty(Record record)
+	{
+		if (record.rawMetadata == null) return;
+		if (record.metadata.party == null) record.rawMetadata.remove("party");
+		else record.rawMetadata.add("party", metadataGson(record).toJsonTree(record.metadata.party));
+	}
+
 	private Record read(Filepath path)
 	{
-		try (java.io.Reader reader = path.openReader()) { return gson.fromJson(reader, Record.class); } catch (IOException | RuntimeException e) { return null; }
+		try (java.io.Reader reader = path.openReader())
+		{
+			JsonObject saved = new JsonParser().parse(reader).getAsJsonObject();
+			Record record = gson.fromJson(saved, Record.class);
+			// Retain the original JSON for uploads, including exact numbers and explicit nulls.
+			record.rawMetadata = saved.getAsJsonObject("metadata");
+			return record;
+		}
+		catch (IOException | RuntimeException e) { return null; }
 	}
 
 	public synchronized void deleteLocal(String eventId)
@@ -127,6 +178,7 @@ public class EvidenceStore
 	public static final class Record
 	{
 		public AnchorModels.EventEnvelope metadata;
+		private transient JsonObject rawMetadata;
 		public String screenshotPath;
 		public String format;
 		public AnchorModels.EventStatus status;

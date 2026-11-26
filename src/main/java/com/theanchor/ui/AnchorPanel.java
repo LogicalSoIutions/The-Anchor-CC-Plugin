@@ -6,6 +6,8 @@
  */
 package com.theanchor.ui;
 
+import com.theanchor.api.AnchorApiClient;
+import com.theanchor.api.SyncOutbox;
 import com.theanchor.AnchorConfig;
 import com.theanchor.evidence.EventPipeline;
 import com.theanchor.evidence.EvidenceStore;
@@ -101,6 +103,7 @@ public class AnchorPanel extends PluginPanel {
 	private final AtomicBoolean refreshQueued = new AtomicBoolean();
 	private boolean submissionsLoading;
 	private boolean submissionsReloadRequested;
+	private String displayedSubmissionAccount;
 	private SubmissionFilter submissionFilter = SubmissionFilter.ALL;
 	private final JLabel banner = new AspectRatioIconLabel();
 	private final JLabel avatar = new JLabel();
@@ -122,6 +125,9 @@ public class AnchorPanel extends PluginPanel {
 	private final LeaderboardPanel leaderboardsPage;
 	private final java.util.Map<String, JButton> navigationTabs = new java.util.LinkedHashMap<>();
 	private final JPanel settingsPage = verticalPanel();
+	private final JPanel identityReviews = verticalPanel();
+	private final JLabel reviewNotice = wrappedMuted(AnchorApiClient.IDENTITY_REVIEW_MESSAGE);
+	private final SyncOutbox syncOutbox;
 	private boolean rotmExpanded = true;
 	private boolean botwExpanded = true;
 	private boolean sotwExpanded = true;
@@ -143,13 +149,14 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	@Inject
-	public AnchorPanel(AnchorDataService data, EvidenceStore evidence, EventPipeline pipeline,
+	public AnchorPanel(AnchorDataService data, EvidenceStore evidence, EventPipeline pipeline, SyncOutbox syncOutbox,
 			AnchorConfig config, ConfigManager configManager, SpriteManager spriteManager, ItemManager itemManager,
 			ImageCache imageCache) {
 		super(false);
 		this.data = data;
 		this.evidence = evidence;
 		this.pipeline = pipeline;
+		this.syncOutbox = syncOutbox;
 		this.config = config;
 		this.configManager = configManager;
 		this.spriteManager = spriteManager;
@@ -209,6 +216,10 @@ public class AnchorPanel extends PluginPanel {
 		navigationRow.anchor = GridBagConstraints.NORTHWEST;
 		navigation.add(buildTabBar(), navigationRow);
 
+		reviewNotice.setVisible(false);
+		reviewNotice.setForeground(GOLD);
+		headerRow.gridy++;
+		header.add(reviewNotice, headerRow);
 		headerRow.gridy++;
 		header.add(navigation, headerRow);
 
@@ -229,6 +240,7 @@ public class AnchorPanel extends PluginPanel {
 		add(contentPanel, BorderLayout.CENTER);
 		data.addListener(dataListener);
 		pipeline.addListener(dataListener);
+		syncOutbox.addListener(dataListener);
 		refresh();
 	}
 
@@ -247,7 +259,25 @@ public class AnchorPanel extends PluginPanel {
 			actions.add(Box.createVerticalStrut(6));
 		}
 		settingsPage.add(actions);
+		settingsPage.add(identityReviews);
+	}
 
+	private void updateIdentityReviews() {
+		identityReviews.removeAll();
+		List<SyncOutbox.Review> reviews = syncOutbox.reviews(pipeline.activeAccount());
+		identityReviews.setVisible(!reviews.isEmpty());
+		if (!reviews.isEmpty()) {
+			JPanel card = card();
+			card.add(wrappedMuted(AnchorApiClient.IDENTITY_REVIEW_MESSAGE));
+			card.add(wrappedMuted("After a clan admin reviews the link, use Retry Uploads to send the saved requests."));
+			for (SyncOutbox.Review review : reviews) {
+				card.add(label(review.kind.label + " for " + review.name, true));
+				card.add(wrappedMuted(review.detail));
+			}
+			identityReviews.add(card);
+		}
+		identityReviews.revalidate();
+		identityReviews.repaint();
 	}
 
 	private JButton configActionButton(String text, String key, boolean primary) {
@@ -370,6 +400,7 @@ public class AnchorPanel extends PluginPanel {
 					scale(data.profileImage() == null ? placeholderAvatar() : data.profileImage(), 32, 32)));
 		}
 		updateConnectionDot();
+		updateIdentityReviews();
 		rebuildHome();
 		rebuildSubmissions();
 		leaderboardsPage.refresh();
@@ -977,6 +1008,14 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private void rebuildSubmissions() {
+		String account = pipeline.activeAccount();
+		if (!java.util.Objects.equals(account, displayedSubmissionAccount)) {
+			displayedSubmissionAccount = account;
+			submissions.removeAll();
+			submissions.revalidate();
+			submissions.repaint();
+			reviewNotice.setVisible(!syncOutbox.reviews(account).isEmpty());
+		}
 		if (submissionsLoading) {
 			submissionsReloadRequested = true;
 			return;
@@ -984,18 +1023,21 @@ public class AnchorPanel extends PluginPanel {
 		submissionsLoading = true;
 		new SwingWorker<List<EvidenceStore.Record>, Void>() {
 			@Override protected List<EvidenceStore.Record> doInBackground() {
-				return evidence.records();
+				return evidence.records(account);
 			}
 
 			@Override protected void done() {
 				submissionsLoading = false;
-				if (submissionsReloadRequested) {
+				if (submissionsReloadRequested || !java.util.Objects.equals(account, pipeline.activeAccount())) {
 					submissionsReloadRequested = false;
 					rebuildSubmissions();
 					return;
 				}
 				try {
-					renderSubmissions(get());
+					List<EvidenceStore.Record> records = get();
+					reviewNotice.setVisible(!syncOutbox.reviews(account).isEmpty() || records.stream()
+						.anyMatch(record -> record.status == AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED));
+					renderSubmissions(records);
 				} catch (InterruptedException | java.util.concurrent.ExecutionException e) {
 					submissions.removeAll();
 					submissions.add(muted("Unable to load local submissions."));
@@ -1034,8 +1076,14 @@ public class AnchorPanel extends PluginPanel {
 			AnchorModels.EventStatus displayStatus = groupStatus(group);
 			JPanel card = card();
 			card.add(submissionHeading(record, displayStatus, group));
-			if (record.error != null)
+			if (displayStatus == AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED) {
+				card.add(wrappedMuted(AnchorApiClient.IDENTITY_REVIEW_MESSAGE));
+				group.stream().filter(member -> member.status == AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED)
+					.map(member -> member.error).filter(java.util.Objects::nonNull).distinct()
+					.forEach(detail -> card.add(wrappedMuted(detail)));
+			} else if (record.error != null) {
 				card.add(wrappedMuted(record.error));
+			}
 			JSpinner party = new JSpinner(new SpinnerNumberModel(
 					record.metadata.party == null ? 1 : record.metadata.party.submittedPartySize, 1, 100, 1));
 			party.setPreferredSize(new Dimension(54, party.getPreferredSize().height));
@@ -1080,13 +1128,10 @@ public class AnchorPanel extends PluginPanel {
 				proof.addActionListener(e -> showProof(proofRecord));
 				actionButtons.add(proof);
 			}
-			if (displayStatus == AnchorModels.EventStatus.FAILED || displayStatus == AnchorModels.EventStatus.PENDING) {
+			if (displayStatus == AnchorModels.EventStatus.FAILED || displayStatus == AnchorModels.EventStatus.PENDING
+					|| displayStatus == AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED) {
 				JButton retry = actionButton("Retry", true);
-				retry.addActionListener(e -> runSubmissionAction(() -> {
-					for (EvidenceStore.Record member : group)
-						if (member.status == AnchorModels.EventStatus.PENDING || member.status == AnchorModels.EventStatus.FAILED)
-							pipeline.upload(member, true);
-				}));
+				retry.addActionListener(e -> runSubmissionAction(() -> pipeline.retryGroup(record)));
 				actionButtons.add(retry);
 			}
 			if (displayStatus == AnchorModels.EventStatus.DRAFT && canFinalize(group)) {
@@ -1115,7 +1160,7 @@ public class AnchorPanel extends PluginPanel {
 				if (JOptionPane.showConfirmDialog(this, "Remove this local evidence?", "Discard",
 						JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
 					runSubmissionAction(() -> {
-						for (EvidenceStore.Record member : group) evidence.deleteLocal(member.metadata.eventId);
+						for (EvidenceStore.Record member : group) pipeline.discardLocal(member);
 					});
 				}
 			});
@@ -1185,8 +1230,9 @@ public class AnchorPanel extends PluginPanel {
 	private static AnchorModels.EventStatus groupStatus(List<EvidenceStore.Record> group) {
 		if (group == null || group.isEmpty()) return AnchorModels.EventStatus.PENDING;
 		for (AnchorModels.EventStatus candidate : new AnchorModels.EventStatus[] {
-			AnchorModels.EventStatus.FAILED, AnchorModels.EventStatus.PENDING, AnchorModels.EventStatus.UPLOADING,
-			AnchorModels.EventStatus.DRAFT, AnchorModels.EventStatus.REJECTED, AnchorModels.EventStatus.SUBMITTED,
+			AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED, AnchorModels.EventStatus.FAILED,
+			AnchorModels.EventStatus.PENDING, AnchorModels.EventStatus.UPLOADING, AnchorModels.EventStatus.DRAFT,
+			AnchorModels.EventStatus.REJECTED, AnchorModels.EventStatus.UPLOADED, AnchorModels.EventStatus.SUBMITTED,
 			AnchorModels.EventStatus.APPROVED }) {
 			for (EvidenceStore.Record record : group) if (record.status == candidate) return candidate;
 		}
@@ -1428,12 +1474,13 @@ public class AnchorPanel extends PluginPanel {
 	}
 
 	private static JLabel statusBadge(AnchorModels.EventStatus status) {
-		String text = status == null ? "UNKNOWN" : status.name();
+		String text = status == AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED ? "ADMIN REVIEW"
+				: status == null ? "UNKNOWN" : status.name();
 		Color color = status == AnchorModels.EventStatus.SUBMITTED || status == AnchorModels.EventStatus.APPROVED
 				? CONNECTED_COLOR
 				: status == AnchorModels.EventStatus.FAILED || status == AnchorModels.EventStatus.REJECTED
 						? new Color(194, 83, 80)
-						: status == AnchorModels.EventStatus.DRAFT ? GOLD : new Color(150, 154, 158);
+						: (status == AnchorModels.EventStatus.DRAFT || status == AnchorModels.EventStatus.IDENTITY_REVIEW_REQUIRED) ? GOLD : new Color(150, 154, 158);
 		JLabel badge = new JLabel(text, SwingConstants.CENTER);
 		badge.setForeground(color);
 		badge.setFont(AnchorTheme.font(Font.BOLD, 10f));

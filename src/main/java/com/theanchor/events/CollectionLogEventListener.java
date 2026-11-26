@@ -7,6 +7,7 @@ package com.theanchor.events;
 import com.theanchor.evidence.EventPipeline;
 import com.theanchor.evidence.EventDeduplicator;
 import com.theanchor.model.AnchorModels;
+import com.theanchor.model.CharacterIdentity;
 import com.theanchor.service.RulesService;
 import com.theanchor.service.BingoService;
 import com.theanchor.service.PartyTracker;
@@ -15,7 +16,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
@@ -45,7 +45,8 @@ public class CollectionLogEventListener
 	@Inject private PartyTracker parties;
 	@Inject private ScheduledExecutorService executor;
 	@Inject private ClientThread clientThread;
-	private final AtomicBoolean popupStarted = new AtomicBoolean();
+	private long popupAccountHash;
+	private int captureGeneration;
 	/** Chat and popup notifications for one unlock can be separated by several seconds. */
 	private final EventDeduplicator notificationDeduplicator = new EventDeduplicator(30_000L);
 
@@ -58,8 +59,15 @@ public class CollectionLogEventListener
 
 	@Subscribe public void onScriptPostFired(ScriptPostFired event)
 	{
-		if (event.getScriptId() == ScriptID.NOTIFICATION_START) { popupStarted.set(true); return; }
-		if (event.getScriptId() != ScriptID.NOTIFICATION_DELAY || !popupStarted.getAndSet(false)) return;
+		if (event.getScriptId() == ScriptID.NOTIFICATION_START)
+		{
+			popupAccountHash = client.getAccountHash();
+			return;
+		}
+		if (event.getScriptId() != ScriptID.NOTIFICATION_DELAY) return;
+		long popupAccount = popupAccountHash;
+		popupAccountHash = 0L;
+		if (popupAccount == 0L || popupAccount != client.getAccountHash()) return;
 		String title = client.getVarcStrValue(VarClientID.NOTIFICATION_TITLE);
 		String body = client.getVarcStrValue(VarClientID.NOTIFICATION_MAIN);
 		if (!"Collection log".equalsIgnoreCase(title) || body == null) return;
@@ -68,18 +76,30 @@ public class CollectionLogEventListener
 		scheduleCapture(item, "popup");
 	}
 
+	public void reset()
+	{
+		popupAccountHash = 0L;
+		captureGeneration++;
+	}
+
 	private void scheduleCapture(String itemName, String detectionSource)
 	{
-		if (itemName.isEmpty()) return;
+		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+		if (player == null || itemName.isEmpty()) return;
+		int generation = captureGeneration;
 		// RuneLite can publish the collection-log message before its raid LootReceived event.
 		// Waiting one game tick lets that event establish the real encounter category and win
 		// loot deduplication while the collection-log notification is still visible.
-		executor.schedule(() -> clientThread.invokeLater(() -> capture(itemName, detectionSource)), 600, TimeUnit.MILLISECONDS);
+		executor.schedule(() -> clientThread.invokeLater(() ->
+		{
+			if (generation == captureGeneration && player.accountHash.equals(Long.toString(client.getAccountHash())))
+				capture(player.accountHash, itemName, detectionSource);
+		}), 600, TimeUnit.MILLISECONDS);
 	}
 
-	private void capture(String itemName, String detectionSource)
+	private void capture(String account, String itemName, String detectionSource)
 	{
-		if (!acceptNotification(itemName, System.currentTimeMillis())) return;
+		if (!acceptNotification(account, itemName, System.currentTimeMillis())) return;
 		List<AnchorModels.Item> items = collectionLogItems(itemName);
 		HashMap<String, Object> details = new HashMap<>();
 		details.put("itemName", itemName);
@@ -106,10 +126,10 @@ public class CollectionLogEventListener
 		return Collections.singletonList("collection_log");
 	}
 
-	boolean acceptNotification(String itemName, long now)
+	boolean acceptNotification(String account, String itemName, long now)
 	{
 		if (itemName == null || itemName.isEmpty()) return false;
-		return notificationDeduplicator.accept(itemName.toLowerCase(java.util.Locale.ROOT), now);
+		return notificationDeduplicator.accept(account + "|" + itemName.toLowerCase(java.util.Locale.ROOT), now);
 	}
 
 	static String normalizeItemName(String value)

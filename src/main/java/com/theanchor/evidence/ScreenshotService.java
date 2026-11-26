@@ -20,7 +20,7 @@ import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
-import net.runelite.api.Player;
+import net.runelite.api.GameState;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -41,11 +41,10 @@ public class ScreenshotService
 	@Inject private ImageCapture imageCapture;
 	@Inject private ScheduledExecutorService executor;
 
-	public void captureNextFrame(Consumer<BufferedImage> callback)
+	public void captureNextFrame(AnchorModels.PlayerIdentity player, Consumer<BufferedImage> callback)
 	{
-		// Snapshot identity and event data on the client thread, before asynchronous capture.
-		Player player = client.getLocalPlayer();
-		String rsn = player == null || player.getName() == null ? "Unknown player" : player.getName();
+		// Snapshot overlay data on the client thread, before asynchronous capture.
+		String rsn = player.name;
 		String[] lines = { rsn };
 		Color color = Color.WHITE;
 		AnchorModels.BingoEvent event = bingo.current();
@@ -65,7 +64,10 @@ public class ScreenshotService
 		{
 			try
 			{
-				executor.execute(() -> callback.accept(ScreenshotOverlay.render(frame(frame), capturedLines, capturedColor)));
+				boolean sameAccount = client.getGameState() == GameState.LOGGED_IN
+					&& player.accountHash.equals(Long.toString(client.getAccountHash()));
+				executor.execute(() -> callback.accept(sameAccount
+					? ScreenshotOverlay.render(frame(frame), capturedLines, capturedColor) : null));
 			}
 			finally { restorePrivateMessages(hidden); }
 		});

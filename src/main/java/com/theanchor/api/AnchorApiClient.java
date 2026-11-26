@@ -5,6 +5,9 @@
 package com.theanchor.api;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.theanchor.AnchorConfig;
 import com.theanchor.model.AnchorModels;
 import java.io.IOException;
@@ -37,8 +40,14 @@ public class AnchorApiClient
 {
 	public static final String ANCHOR_ORIGIN = "https://the-anchor.cc";
 	private static final Logger log = LoggerFactory.getLogger(AnchorApiClient.class);
-	public static final String PLUGIN_VERSION = "1.1.1";
+	public static final String PLUGIN_VERSION = "1.2.8";
+	public static final String IDENTITY_REVIEW_MESSAGE = "Account name change needs clan admin review. Your upload is saved.";
+	private static final String IDENTITY_REVIEW_CODE = "account_identity_review_required";
 	private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+	static final String COLLECTION_LOG_PATH = "/api/runelite/collection-log";
+	static final String PLAYER_PROGRESS_PATH = "/api/runelite/player-progress";
+	static final String PERSONAL_BEST_PATH = "/api/runelite/personal-bests";
+	static final String PERSONAL_BEST_BULK_PATH = "/api/runelite/personal-bests/bulk";
 	private final OkHttpClient http;
 	private final Gson gson;
 	private final AnchorConfig config;
@@ -79,11 +88,46 @@ public class AnchorApiClient
 		public final int statusCode;
 		public final T value;
 		public final String error;
-		private ApiResult(int statusCode, T value, String error) { this.statusCode = statusCode; this.value = value; this.error = error; }
-		public static <T> ApiResult<T> ok(int code, T value) { return new ApiResult<>(code, value, null); }
-		public static <T> ApiResult<T> error(int code, String error) { return new ApiResult<>(code, null, error); }
-		public boolean isSuccessful() { return statusCode >= 200 && statusCode < 300; }
-		public boolean isRetryable() { return statusCode == 0 || statusCode == 429 || statusCode >= 500; }
+		public final String code;
+		public final String action;
+		public final boolean idempotentReplay;
+		private final Boolean retryable;
+
+		private ApiResult(int statusCode, T value, String error, String code, String action,
+			Boolean retryable, boolean idempotentReplay)
+		{
+			this.statusCode = statusCode;
+			this.value = value;
+			this.error = error;
+			this.code = code;
+			this.action = action;
+			this.retryable = retryable;
+			this.idempotentReplay = idempotentReplay;
+		}
+
+		public static <T> ApiResult<T> ok(int code, T value)
+		{
+			return new ApiResult<>(code, value, null, null, null, null, false);
+		}
+
+		public static <T> ApiResult<T> error(int code, String error)
+		{
+			return new ApiResult<>(code, null, error, null, null, null, false);
+		}
+
+		public boolean isSuccessful() { return statusCode >= 200 && statusCode < 300 && error == null; }
+
+		public boolean needsIdentityReview()
+		{
+			return statusCode == 403 && IDENTITY_REVIEW_CODE.equals(code);
+		}
+
+		public boolean isRetryable()
+		{
+			return !needsIdentityReview() && !Boolean.FALSE.equals(retryable)
+				&& (statusCode == 0 || statusCode == 429 || statusCode >= 500
+					|| (statusCode >= 200 && statusCode < 300 && error != null));
+		}
 	}
 
 	public void getProfile(String name, ResultCallback<AnchorModels.Profile> callback)
@@ -135,11 +179,16 @@ public class AnchorApiClient
 	public void uploadEvent(AnchorModels.EventEnvelope metadata, Filepath screenshot, String format,
 		ResultCallback<AnchorModels.EventResponse> callback)
 	{
+		String json = "diary".equals(metadata.eventType)
+			? gson.newBuilder().serializeNulls().create().toJson(metadata) : gson.toJson(metadata);
+		uploadEventJson(json, screenshot, format, callback);
+	}
+
+	public void uploadEventJson(String metadataJson, Filepath screenshot, String format,
+		ResultCallback<AnchorModels.EventResponse> callback)
+	{
 		try
 		{
-			// Completion-only diary requirements explicitly require result: null.
-			String metadataJson = "diary".equals(metadata.eventType)
-				? gson.newBuilder().serializeNulls().create().toJson(metadata) : gson.toJson(metadata);
 			MultipartBody.Builder bodyBuilder = new MultipartBody.Builder().setType(MultipartBody.FORM)
 				.addFormDataPart("metadata", null, RequestBody.create(JSON, metadataJson));
 			long screenshotBytes = 0;
@@ -175,19 +224,24 @@ public class AnchorApiClient
 
 	public void syncPbs(AnchorModels.PbBulkRequest request, boolean bulk, ResultCallback<Map> callback)
 	{
-		postJson(bulk ? "/api/runelite/personal-bests/bulk" : "/api/runelite/personal-bests", request, Map.class, callback);
+		postJson(bulk ? PERSONAL_BEST_BULK_PATH : PERSONAL_BEST_PATH, request, Map.class, callback);
 	}
 
 	public void syncPlayerProgress(AnchorModels.PlayerProgressRequest request, ResultCallback<Map> callback)
 	{
-		Runnable send = () -> postJson("/api/runelite/player-progress", request, Map.class, callback);
+		Runnable send = () -> postJson(PLAYER_PROGRESS_PATH, request, Map.class, callback);
 		if (executor == null) send.run();
 		else executor.execute(send);
 	}
 
 	public void syncCollectionLog(AnchorModels.CollectionLogRequest request, ResultCallback<Map> callback)
 	{
-		postJson("/api/runelite/collection-log", request, Map.class, callback);
+		postJson(COLLECTION_LOG_PATH, request, Map.class, callback);
+	}
+
+	void syncSnapshot(String path, JsonObject request, ResultCallback<Map> callback)
+	{
+		postJson(path, request, Map.class, callback);
 	}
 
 	public void updateSubmission(String id, int partySize, int clanMembers, int nonClanMembers,
@@ -221,8 +275,8 @@ public class AnchorApiClient
 
 	private <T> void postJsonWithMethod(String path, Object value, String method, Class<T> type, ResultCallback<T> callback)
 	{
-		String json = gson.toJson(value);
-		if ("/api/runelite/player-progress".equals(path))
+		String json = value instanceof JsonObject ? value.toString() : gson.toJson(value);
+		if (PLAYER_PROGRESS_PATH.equals(path))
 		{
 			if (json.contains("\"name\":null") || json.contains("\"name\":\"\""))
 			{
@@ -261,30 +315,75 @@ public class AnchorApiClient
 			@Override public void onResponse(Call call, Response response)
 			{
 				String body = "";
+				ApiResult<T> result;
 				try (Response ignored = response)
 				{
 					body = response.body() == null ? "" : response.body().string();
-					if (!response.isSuccessful() && response.code() != 409)
-					{
-						journalResponse(requestId, request, startedAt, response.code(), body, safeError(response.code()));
-						log.error("Anchor API returned HTTP {} for {} {}: {}", response.code(), request.method(),
-							request.url().encodedPath(), responsePreview(body));
-						callback.complete(ApiResult.error(response.code(), safeError(response.code())));
-						return;
-					}
-					T parsed = body.isBlank() ? null : gson.fromJson(body, type);
-					journalResponse(requestId, request, startedAt, response.code() == 409 ? 200 : response.code(), body, null);
-					callback.complete(ApiResult.ok(response.code() == 409 ? 200 : response.code(), parsed));
+					result = response.isSuccessful()
+						? ApiResult.ok(response.code(), body.isBlank() ? null : gson.fromJson(body, type))
+						: parseError(response.code(), body, type);
 				}
 				catch (IOException | RuntimeException e)
 				{
-					journalResponse(requestId, request, startedAt, response.code(), body, "Invalid server response");
 					log.error("Invalid Anchor API response for {} {} (HTTP {}, content-type {}): {}", request.method(),
 						request.url().encodedPath(), response.code(), response.header("Content-Type"), responsePreview(body), e);
-					callback.complete(ApiResult.error(0, "Invalid server response"));
+					result = ApiResult.error(response.code(),
+						response.isSuccessful() ? "Invalid server response" : safeError(response.code()));
 				}
+				journalResponse(requestId, request, startedAt, response.code(), body, result.error);
+				if (!result.isSuccessful() && !result.idempotentReplay)
+				{
+					log.error("Anchor API returned HTTP {} for {} {}: {}", response.code(), request.method(),
+						request.url().encodedPath(), responsePreview(body));
+				}
+				callback.complete(result);
 			}
 		});
+	}
+
+	private <T> ApiResult<T> parseError(int status, String body, Class<T> type)
+	{
+		JsonObject fields;
+		try
+		{
+			JsonElement parsed = new JsonParser().parse(body);
+			if (!parsed.isJsonObject()) return ApiResult.error(status, safeError(status));
+			fields = parsed.getAsJsonObject();
+		}
+		catch (RuntimeException e)
+		{
+			return ApiResult.error(status, safeError(status));
+		}
+
+		String code = stringField(fields, "code");
+		String action = stringField(fields, "action");
+		Boolean retryable = booleanField(fields, "retryable");
+		if (status == 409 && type == AnchorModels.EventResponse.class
+			&& Boolean.TRUE.equals(booleanField(fields, "idempotentReplay")))
+		{
+			return new ApiResult<>(status, gson.fromJson(fields, type), null, code, action, retryable, true);
+		}
+		String error = safeError(status);
+		if (status == 403 && IDENTITY_REVIEW_CODE.equals(code))
+		{
+			String detail = stringField(fields, "error");
+			error = detail == null || detail.isBlank() ? "Contact a clan admin to review this character link." : detail;
+		}
+		return new ApiResult<>(status, null, error, code, action, retryable, false);
+	}
+
+	private static String stringField(JsonObject fields, String name)
+	{
+		JsonElement value = fields.get(name);
+		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()
+			? value.getAsString() : null;
+	}
+
+	private static Boolean booleanField(JsonObject fields, String name)
+	{
+		JsonElement value = fields.get(name);
+		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean()
+			? value.getAsBoolean() : null;
 	}
 
 	private String journalRequest(Request request, String payload)

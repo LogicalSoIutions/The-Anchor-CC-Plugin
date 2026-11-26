@@ -305,7 +305,10 @@ public final class AnchorModels
 		public boolean finalizeSubmission = true;
 	}
 
-	public enum EventStatus { PENDING, UPLOADING, DRAFT, SUBMITTED, APPROVED, REJECTED, FAILED }
+	public enum EventStatus
+	{
+		PENDING, UPLOADING, UPLOADED, DRAFT, SUBMITTED, APPROVED, REJECTED, FAILED, IDENTITY_REVIEW_REQUIRED
+	}
 
 	public static final class EventEnvelope
 	{

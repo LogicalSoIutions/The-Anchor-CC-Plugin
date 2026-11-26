@@ -1,5 +1,6 @@
 package com.theanchor.ui;
 
+import com.theanchor.api.AnchorApiClient;
 import com.theanchor.collection.CollectionLogSyncService;
 import com.theanchor.service.AnchorDataService;
 import javax.inject.Inject;
@@ -34,7 +35,7 @@ public class CollectionLogAutoSync
 	private final AnchorDataService data;
 	private final CollectionLogSyncService collectionLogSync;
 	private boolean waitingForCapture;
-	private boolean uploadInProgress;
+	private Object activeUpload;
 	private boolean fullCaptureRequested;
 	private long captureAccountHash;
 	private int openedAtTick = Integer.MAX_VALUE;
@@ -60,7 +61,7 @@ public class CollectionLogAutoSync
 	{
 		eventBus.unregister(this);
 		waitingForCapture = false;
-		uploadInProgress = false;
+		activeUpload = null;
 		fullCaptureRequested = false;
 	}
 
@@ -68,12 +69,17 @@ public class CollectionLogAutoSync
 	void refreshRequested()
 	{
 		if (!data.isCurrentPlayerClanMember()) return;
-		if (uploadInProgress)
+		if (activeUpload != null)
 		{
 			message("A sync is already in progress.");
 			return;
 		}
 		if (isPohLog()) return;
+		if (collectionLogSync.needsIdentityReview())
+		{
+			message(AnchorApiClient.IDENTITY_REVIEW_MESSAGE + " Use Retry Uploads in The Anchor settings after review.");
+			return;
+		}
 		armCapture();
 		requestFullCapture();
 	}
@@ -83,7 +89,7 @@ public class CollectionLogAutoSync
 	{
 		if (!data.isCurrentPlayerClanMember()
 			|| event.getGroupId() != InterfaceID.COLLECTION || isPohLog()) return;
-		if (client.getAccountHash() == 0L || uploadInProgress || !collectionLogSync.isAutomaticSyncDue()) return;
+		if (client.getAccountHash() == 0L || activeUpload != null || !collectionLogSync.isAutomaticSyncDue()) return;
 		armCapture();
 	}
 
@@ -112,7 +118,7 @@ public class CollectionLogAutoSync
 			waitingForCapture = false;
 			return;
 		}
-		if (fullCaptureRequested && !uploadInProgress
+		if (fullCaptureRequested && activeUpload == null
 			&& data.connection() == AnchorDataService.Connection.CONNECTED
 			&& collectionLogSync.isCaptureReadySince(openedAtTick))
 		{
@@ -143,6 +149,7 @@ public class CollectionLogAutoSync
 	private void requestFullCapture()
 	{
 		if (isPohLog() || client.getGameState() != GameState.LOGGED_IN
+			|| captureAccountHash == 0L || client.getAccountHash() != captureAccountHash
 			|| client.getWidget(InterfaceID.Collection.SEARCH_TOGGLE) == null) return;
 		// Set the guard before init, which fires COLLECTION_LOG_SETUP again.
 		fullCaptureRequested = true;
@@ -166,33 +173,27 @@ public class CollectionLogAutoSync
 			return;
 		}
 		waitingForCapture = false;
-		uploadInProgress = true;
-		if (collectionLogSync.syncCapturedItems(this::onSyncFinished))
+		Object upload = new Object();
+		activeUpload = upload;
+		long account = captureAccountHash;
+		if (collectionLogSync.syncCapturedItems(result -> clientThread.invokeLater(() ->
+		{
+			if (activeUpload != upload) return;
+			activeUpload = null;
+			if (client.getGameState() != GameState.LOGGED_IN || client.getAccountHash() != account) return;
+			if (result.isSuccessful()) message("Your collection log has been synced with The Anchor.");
+			else if (result.needsIdentityReview()) message(AnchorApiClient.IDENTITY_REVIEW_MESSAGE);
+			else message("Collection log sync failed. " + result.error);
+		})))
 		{
 			message("Syncing your collection log with The Anchor...");
 		}
 		else
 		{
-			uploadInProgress = false;
+			activeUpload = null;
 			log.error("Automatic collection log sync lost capture readiness before upload");
 			message("Collection data is still loading. Wait a moment and try again.");
 		}
-	}
-
-	private void onSyncFinished(boolean successful)
-	{
-		clientThread.invokeLater(() ->
-		{
-			uploadInProgress = false;
-			if (successful)
-			{
-				message("Your collection log has been synced with The Anchor.");
-			}
-			else
-			{
-				message("The Anchor queued your collection log and will retry it automatically.");
-			}
-		});
 	}
 
 	private boolean isPohLog()
@@ -207,7 +208,7 @@ public class CollectionLogAutoSync
 
 	public String overlayMessage()
 	{
-		if (uploadInProgress) return CollectionLogSyncOverlay.SYNCING_MESSAGE;
+		if (activeUpload != null) return CollectionLogSyncOverlay.SYNCING_MESSAGE;
 		if (waitingForCapture) return CollectionLogSyncOverlay.READING_MESSAGE;
 		return CollectionLogSyncOverlay.MESSAGE;
 	}

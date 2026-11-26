@@ -5,6 +5,8 @@
 package com.theanchor.pb;
 
 import com.theanchor.api.AnchorApiClient;
+import com.theanchor.api.SyncOutbox;
+import com.theanchor.model.CharacterIdentity;
 import com.theanchor.evidence.EventPipeline;
 import com.theanchor.model.AnchorModels;
 import com.theanchor.service.PartyTracker;
@@ -106,13 +108,13 @@ public class PersonalBestService
 	@Inject private Client client;
 	@Inject private ClientThread clientThread;
 	@Inject private ConfigManager configManager;
-	@Inject private AnchorApiClient api;
+	@Inject private SyncOutbox outbox;
 	@Inject private EventPipeline pipeline;
 	@Inject private PvmDiaryContractService diaryContract;
 	@Inject private PartyTracker parties;
 	private final Map<String, Double> known = new HashMap<>();
-	private volatile String status = "Never synced";
-	private String lastFingerprint;
+	private final Map<String, String> syncedFingerprints = new java.util.concurrent.ConcurrentHashMap<>();
+	private String captureAccount;
 	private boolean journalLoaded;
 	private Scoreboard pendingScoreboard;
 	private String pendingSpecialActivity;
@@ -128,13 +130,17 @@ public class PersonalBestService
 	private AnchorModels.PbRecord pendingCoxCompletion;
 	private long pendingCoxCompletionAt;
 
-	public String status() { return status; }
 	public void onLogin()
 	{
+		captureAccount = Long.toString(client.getAccountHash());
+		journalLoaded = false;
+		pendingScoreboard = null;
 		pendingSpecialActivity = null;
 		pendingRaidActivity = null;
 		pendingRaidTotalDurationMillis = null;
 		pendingTobDurationMillis = null;
+		pendingRaidTeamSize = null;
+		pendingRaidInvocation = null;
 		pendingRaidAt = 0;
 		pendingCoxCompletion = null;
 		pendingCoxCompletionAt = 0;
@@ -144,7 +150,15 @@ public class PersonalBestService
 
 	@Subscribe public void onConfigChanged(ConfigChanged event)
 	{
-		if (!GROUP.equals(event.getGroup()) || event.getNewValue() == null) return;
+		if (!GROUP.equals(event.getGroup()) || event.getNewValue() == null || event.getProfile() == null) return;
+		clientThread.invoke(() -> captureProfileUpdate(event));
+	}
+
+	private void captureProfileUpdate(ConfigChanged event)
+	{
+		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+		if (player == null || !player.accountHash.equals(captureAccount)
+			|| !event.getProfile().equals(profileFor(player))) return;
 		// The personalbest profile keeps the PB catalogue current, but is not
 		// completion evidence. Some activities store a timer that differs from
 		// the game completion message, so diary evidence is chat-driven only.
@@ -158,6 +172,7 @@ public class PersonalBestService
 
 	@Subscribe public void onChatMessage(ChatMessage event)
 	{
+		if (!captureAccountMatches()) return;
 		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM) return;
 		String message = normalizeCompletionMessage(event.getMessage());
 		Double colosseumSeconds = colosseumCompletionDuration(message);
@@ -475,6 +490,7 @@ public class PersonalBestService
 
 	@Subscribe public void onWidgetLoaded(WidgetLoaded event)
 	{
+		if (!captureAccountMatches()) return;
 		if (event.getGroupId() == InterfaceID.JOURNALSCROLL)
 		{
 			journalLoaded = true;
@@ -484,6 +500,7 @@ public class PersonalBestService
 
 	@Subscribe public void onGameTick(GameTick event)
 	{
+		if (!captureAccountMatches()) return;
 		if (pendingCoxCompletion != null
 			&& System.currentTimeMillis() - pendingCoxCompletionAt >= COX_COMPLETION_CONFIRMATION_TIMEOUT_MILLIS)
 			capturePendingCoxCompletion();
@@ -510,13 +527,9 @@ public class PersonalBestService
 					known.put(key, seconds);
 				}
 			}
-			String fingerprint = fingerprint(records);
-			if (fingerprint.equals(lastFingerprint))
-			{
-				return;
-			}
-			lastFingerprint = fingerprint;
-			sync(records, true, false, null, true);
+			AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+			if (player != null && !fingerprint(records).equals(syncedFingerprints.get(fingerprintKey(player))))
+				sync(records, true, false, null, true);
 		}
 	}
 
@@ -579,19 +592,22 @@ public class PersonalBestService
 		Scoreboard(String boss, int titleComponentId, int pbComponentId) { this.boss = boss; this.titleComponentId = titleComponentId; this.pbComponentId = pbComponentId; }
 	}
 
-	public void syncAll(boolean force)
+	/** Returns false until RuneLite has selected the profile for the current character. */
+	public boolean syncAll()
 	{
-		if (client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null) { status = "Log in before syncing PBs"; return; }
-		String profile = configManager.getRSProfileKey(); if (profile == null) { status = "RuneLite profile is unavailable"; return; }
+		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+		String profile = profileFor(player);
+		if (profile == null) return false;
+		if (outbox.hasReview(SyncOutbox.Kind.PERSONAL_BEST_BULK, player)) return true;
+
 		List<AnchorModels.PbRecord> records = new ArrayList<>();
 		for (String key : configManager.getRSProfileConfigurationKeys(GROUP, profile, ""))
 		{
-			Double seconds = configManager.getRSProfileConfiguration(GROUP, key, double.class);
+			Double seconds = configManager.getConfiguration(GROUP, profile, key, double.class);
 			if (seconds != null) records.add(diaryRecordFromKey(key, seconds));
 		}
-		String fingerprint = fingerprint(records);
-		if (!force && fingerprint.equals(lastFingerprint)) { status = "PBs already up to date"; return; }
-		lastFingerprint = fingerprint; sync(records, true, false, null);
+		sync(records, true, false, null);
+		return true;
 	}
 
 	private void sync(List<AnchorModels.PbRecord> records, boolean bulk, boolean evidence, Double previous)
@@ -601,34 +617,28 @@ public class PersonalBestService
 
 	private void sync(List<AnchorModels.PbRecord> records, boolean bulk, boolean evidence, Double previous, boolean fromAdventureLog)
 	{
-		if ((!bulk && records.isEmpty()) || client.getLocalPlayer() == null) return;
-		if (fromAdventureLog)
-		{
-			message("Syncing your adventure log with The Anchor...");
-		}
-		AnchorModels.PbBulkRequest request = new AnchorModels.PbBulkRequest(); request.syncId = UUID.randomUUID().toString(); request.capturedAt = Instant.now().toString();
-		request.player = new AnchorModels.PlayerIdentity(); request.player.name = client.getLocalPlayer().getName(); request.player.accountHash = String.valueOf(client.getAccountHash()); request.records.addAll(records);
-		status = "Syncing " + records.size() + " PB" + (records.size() == 1 ? "" : "s") + "…";
-		api.syncPbs(request, bulk, result ->
-		{
-			status = result.isSuccessful() ? "PBs synced " + Instant.now() : result.error;
-			if (!result.isSuccessful()) log.error(
-				"Anchor PB sync failed: player={}, syncId={}, error={}", request.player.name, request.syncId, result.error);
+		AnchorModels.PlayerIdentity player = CharacterIdentity.capture(client);
+		if ((!bulk && records.isEmpty()) || player == null) return;
+		if (fromAdventureLog) message("Syncing your adventure log with The Anchor...");
 
-			if (fromAdventureLog)
+		AnchorModels.PbBulkRequest request = new AnchorModels.PbBulkRequest();
+		request.syncId = UUID.randomUUID().toString();
+		request.capturedAt = Instant.now().toString();
+		request.player = player;
+		request.records.addAll(records);
+		String fingerprint = bulk ? fingerprint(records) : null;
+		outbox.enqueue(bulk ? SyncOutbox.Kind.PERSONAL_BEST_BULK : SyncOutbox.Kind.PERSONAL_BEST, request, result ->
+		{
+			if (bulk && result.isSuccessful()) syncedFingerprints.put(fingerprintKey(player), fingerprint);
+			if (!fromAdventureLog) return;
+			clientThread.invokeLater(() ->
 			{
-				clientThread.invokeLater(() ->
-				{
-					if (result.isSuccessful())
-					{
-						message("Your adventure log has been synced with The Anchor.");
-					}
-					else
-					{
-						message("The Anchor queued your adventure log and will retry it automatically.");
-					}
-				});
-			}
+				if (client.getGameState() != GameState.LOGGED_IN
+					|| !player.accountHash.equals(Long.toString(client.getAccountHash()))) return;
+				if (result.isSuccessful()) message("Your adventure log has been synced with The Anchor.");
+				else if (result.needsIdentityReview()) message(AnchorApiClient.IDENTITY_REVIEW_MESSAGE);
+				else message("Adventure log sync failed. " + result.error);
+			});
 		});
 		if (evidence)
 		{
@@ -666,16 +676,38 @@ public class PersonalBestService
 
 	private void hydrateKnown()
 	{
-		known.clear(); String profile = configManager.getRSProfileKey(); if (profile == null) return;
+		known.clear();
+		String profile = profileFor(CharacterIdentity.capture(client));
+		if (profile == null) return;
 		for (String key : configManager.getRSProfileConfigurationKeys(GROUP, profile, ""))
 		{
-			Double value = configManager.getRSProfileConfiguration(GROUP, key, double.class);
+			Double value = configManager.getConfiguration(GROUP, profile, key, double.class);
 			if (value != null)
 			{
 				AnchorModels.PbRecord record = diaryRecordFromKey(key, value);
 				known.put(recordKey(record), value);
 			}
 		}
+	}
+
+	private boolean captureAccountMatches()
+	{
+		return client.getGameState() == GameState.LOGGED_IN
+			&& Long.toString(client.getAccountHash()).equals(captureAccount);
+	}
+
+	private String profileFor(AnchorModels.PlayerIdentity player)
+	{
+		String key = configManager.getRSProfileKey();
+		if (player == null || key == null) return null;
+		long accountHash = Long.parseLong(player.accountHash);
+		return configManager.getRSProfiles().stream().anyMatch(profile ->
+			key.equals(profile.getKey()) && profile.getAccountHash() == accountHash) ? key : null;
+	}
+
+	private static String fingerprintKey(AnchorModels.PlayerIdentity player)
+	{
+		return player.accountHash + ":" + player.name;
 	}
 
 	static String recordKey(AnchorModels.PbRecord record)
