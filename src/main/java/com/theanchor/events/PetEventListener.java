@@ -35,6 +35,9 @@ public class PetEventListener
 	private static final Pattern UNTRADEABLE_DROP_PATTERN = Pattern.compile("^Untradeable drop:\\s*(.+?)(?:\\s+(?:\\(\\d+\\)|\\[\\d+\\]))?[.!…]*$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern COLLECTION_LOG_PATTERN = Pattern.compile("New item added to your collection log:\\s*(.+)", Pattern.CASE_INSENSITIVE);
 	private static final Pattern KILL_COUNT_PATTERN = Pattern.compile("^Your (.+?) (?:kill|chest|completion) count is: [\\d,]+[.!]?$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern DOOM_DELVE_DURATION_PATTERN = Pattern.compile(
+		"^Delve level:\\s*[1-9][0-9]*\\s+duration:\\s*[0-9]+(?::[0-9]{2})+(?:\\.[0-9]+)?(?=\\s|[.!]|$)",
+		Pattern.CASE_INSENSITIVE);
 	private static final Pattern CLAN_SOURCE_PATTERN = Pattern.compile("\\s+from\\s+(.+?)[.!…]*$", Pattern.CASE_INSENSITIVE);
 	@Inject private EventPipeline pipeline;
 	@Inject private BingoService bingo;
@@ -72,6 +75,11 @@ public class PetEventListener
 		if (gameMessage && killMatcher.matches())
 		{
 			rememberBoss(killMatcher.group(1));
+			return;
+		}
+		if (gameMessage && DOOM_DELVE_DURATION_PATTERN.matcher(message).find())
+		{
+			rememberBoss("Doom of Mokhaiotl");
 			return;
 		}
 		Matcher namedMatcher = NAMED_PET_PATTERN.matcher(message);
