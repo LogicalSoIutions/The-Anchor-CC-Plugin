@@ -108,7 +108,7 @@ public class EventPipeline
 		envelope.context.put("submissionGroupId", group.id);
 		envelope.context.put("submissionTypes", group.types());
 		envelope.context.put("finalizeSubmission", finalizeSubmission);
-		if (!screenshotRequired)
+		if (!screenshotRequired || "personal_best".equals(type))
 		{
 			executor.execute(() ->
 			{
@@ -211,7 +211,7 @@ public class EventPipeline
 		}
 		record.status = AnchorModels.EventStatus.UPLOADING; record.error = null; record.updatedAt = Instant.now().toString(); persist(record);
 		Filepath screenshot;
-		try { screenshot = store.screenshot(record); }
+		try { screenshot = "personal_best".equals(eventType(record)) ? null : store.screenshot(record); }
 		catch (java.io.IOException | IllegalArgumentException e)
 		{
 			record.status = AnchorModels.EventStatus.FAILED;
